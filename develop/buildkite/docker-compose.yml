@@ -71,6 +71,11 @@ services:
       - BUILDKITE_JOB_ID
       - BUILDKITE_BUILD_ID
       - BUILDKITE_BUILD_NUMBER
+      - TEST_KEY
+      - TEST_TOKEN
+      - TEST_PASSWORD
+      - TEST_SECRET
+      - TEST_VALUE
     depends_on:
       - cassandra
       - mysql

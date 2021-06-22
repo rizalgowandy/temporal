@@ -1,12 +1,19 @@
 steps:
-  - label: ":golang: build"
+  - label: ":bash: test password"
+    agents:
+      queue: "default"
+    command: "./develop/buildkite/test-password.sh"
+
+  - label: ":golang: test password"
     agents:
       queue: "default"
       docker: "*"
-    command: "make ci-build"
+    command: "make test-password"
+    artifact_paths:
+      - ".coverage/*.out"
     plugins:
       - docker-compose#v3.1.0:
-          run: build
+          run: unit-test
           config: ./develop/buildkite/docker-compose.yml
 
   - wait
