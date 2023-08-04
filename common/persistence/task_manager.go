@@ -25,8 +25,8 @@
 package persistence
 
 import (
+	"context"
 	"fmt"
-	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
@@ -36,21 +36,19 @@ import (
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
-const (
-	initialRangeID     = 1 // Id of the first range of a new task queue
-	stickyTaskQueueTTL = 24 * time.Hour
-)
-
 type taskManagerImpl struct {
 	taskStore  TaskStore
 	serializer serialization.Serializer
 }
 
 // NewTaskManager creates a new instance of TaskManager
-func NewTaskManager(store TaskStore) TaskManager {
+func NewTaskManager(
+	store TaskStore,
+	serializer serialization.Serializer,
+) TaskManager {
 	return &taskManagerImpl{
 		taskStore:  store,
-		serializer: serialization.NewSerializer(),
+		serializer: serializer,
 	}
 }
 
@@ -62,99 +60,47 @@ func (m *taskManagerImpl) GetName() string {
 	return m.taskStore.GetName()
 }
 
-func (m *taskManagerImpl) LeaseTaskQueue(request *LeaseTaskQueueRequest) (*LeaseTaskQueueResponse, error) {
-	if len(request.TaskQueue) == 0 {
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("LeaseTaskQueue requires non empty task queue"))
+func (m *taskManagerImpl) CreateTaskQueue(
+	ctx context.Context,
+	request *CreateTaskQueueRequest,
+) (*CreateTaskQueueResponse, error) {
+	taskQueueInfo := request.TaskQueueInfo
+	if taskQueueInfo.LastUpdateTime == nil {
+		panic("CreateTaskQueue encountered LastUpdateTime not set")
 	}
-
-	taskQueue, err := m.taskStore.GetTaskQueue(&InternalGetTaskQueueRequest{
-		NamespaceID: request.NamespaceID,
-		TaskQueue:   request.TaskQueue,
-		TaskType:    request.TaskType,
-	})
-
-	switch err.(type) {
-	case nil:
-		// If request.RangeID is > 0, we are trying to renew an existing lease on the task queue.
-		// If request.RangeID=0, we are trying to steal the task queue from its current owner.
-		if request.RangeID > 0 && request.RangeID != taskQueue.RangeID {
-			return nil, &ConditionFailedError{
-				Msg: fmt.Sprintf("LeaseTaskQueue: renew failed: taskQueue:%v, taskQueueType:%v, haveRangeID:%v, gotRangeID:%v",
-					request.TaskQueue, request.TaskType, request.RangeID, taskQueue.RangeID),
-			}
-		}
-		taskQueueInfo, err := m.serializer.TaskQueueInfoFromBlob(taskQueue.TaskQueueInfo)
-		if err != nil {
-			return nil, serviceerror.NewUnavailable(fmt.Sprintf("LeaseTaskQueue operation failed during serialization. TaskQueue: %v, TaskType: %v, Error: %v", request.TaskQueue, request.TaskType, err))
-		}
-
-		taskQueueInfo.LastUpdateTime = timestamp.TimeNowPtrUtc()
-		taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
-		if err != nil {
-			return nil, err
-		}
-		err = m.taskStore.ExtendLease(&InternalExtendLeaseRequest{
-			NamespaceID:   request.NamespaceID,
-			TaskQueue:     request.TaskQueue,
-			TaskType:      request.TaskType,
-			RangeID:       taskQueue.RangeID,
-			TaskQueueInfo: taskQueueInfoBlob,
-		})
-		if err != nil {
-			return nil, err
-		}
-
-		return &LeaseTaskQueueResponse{
-			TaskQueueInfo: &PersistedTaskQueueInfo{
-				Data:    taskQueueInfo,
-				RangeID: taskQueue.RangeID + 1,
-			},
-		}, nil
-
-	case *serviceerror.NotFound:
-		// First time task queue is used
-		taskQueueInfo := &persistencespb.TaskQueueInfo{
-			NamespaceId:    request.NamespaceID,
-			Name:           request.TaskQueue,
-			TaskType:       request.TaskType,
-			Kind:           request.TaskQueueKind,
-			AckLevel:       0,
-			ExpiryTime:     nil,
-			LastUpdateTime: timestamp.TimeNowPtrUtc(),
-		}
-		taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
-		if err != nil {
-			return nil, err
-		}
-
-		if err := m.taskStore.CreateTaskQueue(&InternalCreateTaskQueueRequest{
-			NamespaceID:   request.NamespaceID,
-			TaskQueue:     request.TaskQueue,
-			TaskType:      request.TaskType,
-			RangeID:       initialRangeID,
-			TaskQueueInfo: taskQueueInfoBlob,
-		}); err != nil {
-			return nil, err
-		}
-
-		// return newly created TaskQueueInfo
-		return &LeaseTaskQueueResponse{
-			TaskQueueInfo: &PersistedTaskQueueInfo{
-				Data:    taskQueueInfo,
-				RangeID: initialRangeID,
-			},
-		}, nil
-	default:
-		// failed
+	if taskQueueInfo.ExpiryTime == nil && taskQueueInfo.GetKind() == enumspb.TASK_QUEUE_KIND_STICKY {
+		panic("CreateTaskQueue encountered ExpiryTime not set for sticky task queue")
+	}
+	taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
+	if err != nil {
 		return nil, err
 	}
+
+	internalRequest := &InternalCreateTaskQueueRequest{
+		NamespaceID:   request.TaskQueueInfo.GetNamespaceId(),
+		TaskQueue:     request.TaskQueueInfo.GetName(),
+		TaskType:      request.TaskQueueInfo.GetTaskType(),
+		TaskQueueKind: request.TaskQueueInfo.GetKind(),
+		RangeID:       request.RangeID,
+		ExpiryTime:    taskQueueInfo.ExpiryTime,
+		TaskQueueInfo: taskQueueInfoBlob,
+	}
+	if err := m.taskStore.CreateTaskQueue(ctx, internalRequest); err != nil {
+		return nil, err
+	}
+	return &CreateTaskQueueResponse{}, nil
 }
 
-func (m *taskManagerImpl) UpdateTaskQueue(request *UpdateTaskQueueRequest) (*UpdateTaskQueueResponse, error) {
+func (m *taskManagerImpl) UpdateTaskQueue(
+	ctx context.Context,
+	request *UpdateTaskQueueRequest,
+) (*UpdateTaskQueueResponse, error) {
 	taskQueueInfo := request.TaskQueueInfo
-	taskQueueInfo.LastUpdateTime = timestamp.TimeNowPtrUtc()
-	if taskQueueInfo.GetKind() == enumspb.TASK_QUEUE_KIND_STICKY {
-		taskQueueInfo.ExpiryTime = timestamp.TimePtr(time.Now().UTC().Add(stickyTaskQueueTTL))
+	if taskQueueInfo.LastUpdateTime == nil {
+		panic("UpdateTaskQueue encountered LastUpdateTime not set")
+	}
+	if taskQueueInfo.ExpiryTime == nil && taskQueueInfo.GetKind() == enumspb.TASK_QUEUE_KIND_STICKY {
+		panic("UpdateTaskQueue encountered ExpiryTime not set for sticky task queue")
 	}
 	taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
 	if err != nil {
@@ -165,17 +111,45 @@ func (m *taskManagerImpl) UpdateTaskQueue(request *UpdateTaskQueueRequest) (*Upd
 		NamespaceID:   request.TaskQueueInfo.GetNamespaceId(),
 		TaskQueue:     request.TaskQueueInfo.GetName(),
 		TaskType:      request.TaskQueueInfo.GetTaskType(),
-		TaskQueueKind: request.TaskQueueInfo.GetKind(),
 		RangeID:       request.RangeID,
-		ExpiryTime:    taskQueueInfo.ExpiryTime,
 		TaskQueueInfo: taskQueueInfoBlob,
-	}
 
-	return m.taskStore.UpdateTaskQueue(internalRequest)
+		TaskQueueKind: request.TaskQueueInfo.GetKind(),
+		ExpiryTime:    taskQueueInfo.ExpiryTime,
+
+		PrevRangeID: request.PrevRangeID,
+	}
+	return m.taskStore.UpdateTaskQueue(ctx, internalRequest)
 }
 
-func (m *taskManagerImpl) ListTaskQueue(request *ListTaskQueueRequest) (*ListTaskQueueResponse, error) {
-	internalResp, err := m.taskStore.ListTaskQueue(request)
+func (m *taskManagerImpl) GetTaskQueue(
+	ctx context.Context,
+	request *GetTaskQueueRequest,
+) (*GetTaskQueueResponse, error) {
+	response, err := m.taskStore.GetTaskQueue(ctx, &InternalGetTaskQueueRequest{
+		NamespaceID: request.NamespaceID,
+		TaskQueue:   request.TaskQueue,
+		TaskType:    request.TaskType,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	taskQueueInfo, err := m.serializer.TaskQueueInfoFromBlob(response.TaskQueueInfo)
+	if err != nil {
+		return nil, err
+	}
+	return &GetTaskQueueResponse{
+		TaskQueueInfo: taskQueueInfo,
+		RangeID:       response.RangeID,
+	}, nil
+}
+
+func (m *taskManagerImpl) ListTaskQueue(
+	ctx context.Context,
+	request *ListTaskQueueRequest,
+) (*ListTaskQueueResponse, error) {
+	internalResp, err := m.taskStore.ListTaskQueue(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -197,11 +171,17 @@ func (m *taskManagerImpl) ListTaskQueue(request *ListTaskQueueRequest) (*ListTas
 	}, nil
 }
 
-func (m *taskManagerImpl) DeleteTaskQueue(request *DeleteTaskQueueRequest) error {
-	return m.taskStore.DeleteTaskQueue(request)
+func (m *taskManagerImpl) DeleteTaskQueue(
+	ctx context.Context,
+	request *DeleteTaskQueueRequest,
+) error {
+	return m.taskStore.DeleteTaskQueue(ctx, request)
 }
 
-func (m *taskManagerImpl) CreateTasks(request *CreateTasksRequest) (*CreateTasksResponse, error) {
+func (m *taskManagerImpl) CreateTasks(
+	ctx context.Context,
+	request *CreateTasksRequest,
+) (*CreateTasksResponse, error) {
 	taskQueueInfo := request.TaskQueueInfo.Data
 	taskQueueInfo.LastUpdateTime = timestamp.TimeNowPtrUtc()
 	taskQueueInfoBlob, err := m.serializer.TaskQueueInfoToBlob(taskQueueInfo, enumspb.ENCODING_TYPE_PROTO3)
@@ -229,11 +209,18 @@ func (m *taskManagerImpl) CreateTasks(request *CreateTasksRequest) (*CreateTasks
 		TaskQueueInfo: taskQueueInfoBlob,
 		Tasks:         tasks,
 	}
-	return m.taskStore.CreateTasks(internalRequest)
+	return m.taskStore.CreateTasks(ctx, internalRequest)
 }
 
-func (m *taskManagerImpl) GetTasks(request *GetTasksRequest) (*GetTasksResponse, error) {
-	internalResp, err := m.taskStore.GetTasks(request)
+func (m *taskManagerImpl) GetTasks(
+	ctx context.Context,
+	request *GetTasksRequest,
+) (*GetTasksResponse, error) {
+	if request.InclusiveMinTaskID >= request.ExclusiveMaxTaskID {
+		return &GetTasksResponse{}, nil
+	}
+
+	internalResp, err := m.taskStore.GetTasks(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -245,15 +232,82 @@ func (m *taskManagerImpl) GetTasks(request *GetTasksRequest) (*GetTasksResponse,
 		}
 		tasks[i] = task
 	}
-	return &GetTasksResponse{
-		Tasks: tasks,
+	return &GetTasksResponse{Tasks: tasks, NextPageToken: internalResp.NextPageToken}, nil
+}
+
+func (m *taskManagerImpl) CompleteTask(
+	ctx context.Context,
+	request *CompleteTaskRequest,
+) error {
+	return m.taskStore.CompleteTask(ctx, request)
+}
+
+func (m *taskManagerImpl) CompleteTasksLessThan(
+	ctx context.Context,
+	request *CompleteTasksLessThanRequest,
+) (int, error) {
+	return m.taskStore.CompleteTasksLessThan(ctx, request)
+}
+
+// GetTaskQueueUserData implements TaskManager
+func (m *taskManagerImpl) GetTaskQueueUserData(ctx context.Context, request *GetTaskQueueUserDataRequest) (*GetTaskQueueUserDataResponse, error) {
+	response, err := m.taskStore.GetTaskQueueUserData(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	data, err := m.serializer.TaskQueueUserDataFromBlob(response.UserData)
+	if err != nil {
+		return nil, err
+	}
+	return &GetTaskQueueUserDataResponse{UserData: &persistencespb.VersionedTaskQueueUserData{Version: response.Version, Data: data}}, nil
+}
+
+// UpdateTaskQueueUserData implements TaskManager
+func (m *taskManagerImpl) UpdateTaskQueueUserData(ctx context.Context, request *UpdateTaskQueueUserDataRequest) error {
+	userData, err := m.serializer.TaskQueueUserDataToBlob(request.UserData.Data, enumspb.ENCODING_TYPE_PROTO3)
+	if err != nil {
+		return err
+	}
+	internalRequest := &InternalUpdateTaskQueueUserDataRequest{
+		NamespaceID:     request.NamespaceID,
+		TaskQueue:       request.TaskQueue,
+		Version:         request.UserData.Version,
+		UserData:        userData,
+		BuildIdsAdded:   request.BuildIdsAdded,
+		BuildIdsRemoved: request.BuildIdsRemoved,
+	}
+	return m.taskStore.UpdateTaskQueueUserData(ctx, internalRequest)
+}
+
+func (m *taskManagerImpl) ListTaskQueueUserDataEntries(ctx context.Context, request *ListTaskQueueUserDataEntriesRequest) (*ListTaskQueueUserDataEntriesResponse, error) {
+	response, err := m.taskStore.ListTaskQueueUserDataEntries(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	entries := make([]*TaskQueueUserDataEntry, len(response.Entries))
+	for i, entry := range response.Entries {
+		data, err := m.serializer.TaskQueueUserDataFromBlob(entry.Data)
+		if err != nil {
+			return nil, err
+		}
+		entries[i] = &TaskQueueUserDataEntry{
+			TaskQueue: entry.TaskQueue,
+			UserData: &persistencespb.VersionedTaskQueueUserData{
+				Data:    data,
+				Version: entry.Version,
+			},
+		}
+	}
+	return &ListTaskQueueUserDataEntriesResponse{
+		NextPageToken: response.NextPageToken,
+		Entries:       entries,
 	}, nil
 }
 
-func (m *taskManagerImpl) CompleteTask(request *CompleteTaskRequest) error {
-	return m.taskStore.CompleteTask(request)
+func (m *taskManagerImpl) GetTaskQueuesByBuildId(ctx context.Context, request *GetTaskQueuesByBuildIdRequest) ([]string, error) {
+	return m.taskStore.GetTaskQueuesByBuildId(ctx, request)
 }
 
-func (m *taskManagerImpl) CompleteTasksLessThan(request *CompleteTasksLessThanRequest) (int, error) {
-	return m.taskStore.CompleteTasksLessThan(request)
+func (m *taskManagerImpl) CountTaskQueuesByBuildId(ctx context.Context, request *CountTaskQueuesByBuildIdRequest) (int, error) {
+	return m.taskStore.CountTaskQueuesByBuildId(ctx, request)
 }

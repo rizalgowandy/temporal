@@ -33,12 +33,17 @@ import (
 	"go.temporal.io/api/serviceerror"
 	"go.temporal.io/sdk/activity"
 
+	"go.temporal.io/server/api/adminservice/v1"
+	"go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/api/historyservice/v1"
+	persistencepb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/collection"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/quotas"
@@ -57,13 +62,20 @@ type (
 
 	// Scavenger is the type that holds the state for history scavenger daemon
 	Scavenger struct {
-		numShards   int32
-		db          persistence.ExecutionManager
-		client      historyservice.HistoryServiceClient
-		rateLimiter quotas.RateLimiter
-		metrics     metrics.Client
-		logger      log.Logger
-		isInTest    bool
+		numShards      int32
+		db             persistence.ExecutionManager
+		client         historyservice.HistoryServiceClient
+		adminClient    adminservice.AdminServiceClient
+		registry       namespace.Registry
+		rateLimiter    quotas.RateLimiter
+		metricsHandler metrics.Handler
+		logger         log.Logger
+		isInTest       bool
+		// only clean up history branches that older than this age
+		// Our history archiver delete mutable state, and then upload history to blob store and then delete history.
+		historyDataMinAge           dynamicconfig.DurationPropertyFn
+		executionDataDurationBuffer dynamicconfig.DurationPropertyFn
+		enableRetentionVerification dynamicconfig.BoolPropertyFn
 
 		sync.WaitGroup
 		sync.Mutex
@@ -75,21 +87,13 @@ type (
 		namespaceID string
 		workflowID  string
 		runID       string
-		treeID      string
-		branchID    string
+		branchToken []byte
 	}
 )
 
 const (
 	pageSize  = 100
 	numWorker = 10
-
-	// only clean up history branches that older than this threshold
-	// we double the MaxWorkflowRetentionPeriod to avoid racing condition with history archival.
-	// Our history archiver delete mutable state, and then upload history to blob store and then delete history.
-	// This scanner will face racing condition with archiver because it relys on describe mutable state returning entityNotExist error.
-	// That's why we need to keep MaxWorkflowRetentionPeriod stable and not decreasing all the time.
-	cleanUpThreshold = common.MaxWorkflowRetentionPeriod * 2
 )
 
 // NewScavenger returns an instance of history scavenger daemon
@@ -97,27 +101,37 @@ const (
 // returned object. Calling the Run() method will result in one
 // complete iteration over all of the history branches in the system. For
 // each branch, the scavenger will attempt
-//  - describe the corresponding workflow execution
-//  - deletion of history itself, if there are no workflow execution
+//   - describe the corresponding workflow execution
+//   - deletion of history itself, if there are no workflow execution
 func NewScavenger(
 	numShards int32,
 	db persistence.ExecutionManager,
 	rps int,
 	client historyservice.HistoryServiceClient,
+	adminClient adminservice.AdminServiceClient,
+	registry namespace.Registry,
 	hbd ScavengerHeartbeatDetails,
-	metricsClient metrics.Client,
+	historyDataMinAge dynamicconfig.DurationPropertyFn,
+	executionDataDurationBuffer dynamicconfig.DurationPropertyFn,
+	enableRetentionVerification dynamicconfig.BoolPropertyFn,
+	metricsHandler metrics.Handler,
 	logger log.Logger,
 ) *Scavenger {
 
 	return &Scavenger{
-		numShards: numShards,
-		db:        db,
-		client:    client,
+		numShards:   numShards,
+		db:          db,
+		client:      client,
+		adminClient: adminClient,
+		registry:    registry,
 		rateLimiter: quotas.NewDefaultOutgoingRateLimiter(
 			func() float64 { return float64(rps) },
 		),
-		metrics: metricsClient,
-		logger:  logger,
+		historyDataMinAge:           historyDataMinAge,
+		executionDataDurationBuffer: executionDataDurationBuffer,
+		enableRetentionVerification: enableRetentionVerification,
+		metricsHandler:              metricsHandler.WithTags(metrics.OperationTag(metrics.HistoryScavengerScope)),
+		logger:                      logger,
 
 		hbd: hbd,
 	}
@@ -147,7 +161,7 @@ func (s *Scavenger) loadTasks(
 
 	defer close(reqCh)
 
-	iter := collection.NewPagingIteratorWithToken(s.getPaginationFn(), s.hbd.NextPageToken)
+	iter := collection.NewPagingIteratorWithToken(s.getPaginationFn(ctx), s.hbd.NextPageToken)
 	for iter.HasNext() {
 		if err := s.rateLimiter.Wait(ctx); err != nil {
 			// context done
@@ -159,7 +173,10 @@ func (s *Scavenger) loadTasks(
 			return err
 		}
 
-		task := s.filterTask(item.(persistence.HistoryBranchDetail))
+		// Heartbeat to prevent heartbeat timeout.
+		s.heartbeat(ctx)
+
+		task := s.filterTask(item)
 		if task == nil {
 			continue
 		}
@@ -212,8 +229,8 @@ func (s *Scavenger) filterTask(
 	branch persistence.HistoryBranchDetail,
 ) *taskDetail {
 
-	if time.Now().UTC().Add(-cleanUpThreshold).Before(timestamp.TimeValue(branch.ForkTime)) {
-		s.metrics.IncCounter(metrics.HistoryScavengerScope, metrics.HistoryScavengerSkipCount)
+	if time.Now().UTC().Add(-s.historyDataMinAge()).Before(timestamp.TimeValue(branch.ForkTime)) {
+		s.metricsHandler.Counter(metrics.HistoryScavengerSkipCount.GetMetricName()).Record(1)
 
 		s.Lock()
 		defer s.Unlock()
@@ -224,7 +241,7 @@ func (s *Scavenger) filterTask(
 	namespaceID, workflowID, runID, err := persistence.SplitHistoryGarbageCleanupInfo(branch.Info)
 	if err != nil {
 		s.logger.Error("unable to parse the history cleanup info", tag.DetailInfo(branch.Info))
-		s.metrics.IncCounter(metrics.HistoryScavengerScope, metrics.HistoryScavengerErrorCount)
+		s.metricsHandler.Counter(metrics.HistoryScavengerErrorCount.GetMetricName()).Record(1)
 
 		s.Lock()
 		defer s.Unlock()
@@ -238,8 +255,7 @@ func (s *Scavenger) filterTask(
 		namespaceID: namespaceID,
 		workflowID:  workflowID,
 		runID:       runID,
-		treeID:      branch.TreeID,
-		branchID:    branch.BranchID,
+		branchToken: branch.BranchToken,
 	}
 }
 
@@ -249,7 +265,7 @@ func (s *Scavenger) handleTask(
 ) error {
 	// this checks if the mutableState still exists
 	// if not then the history branch is garbage, we need to delete the history branch
-	_, err := s.client.DescribeMutableState(ctx, &historyservice.DescribeMutableStateRequest{
+	ms, err := s.client.DescribeMutableState(ctx, &historyservice.DescribeMutableStateRequest{
 		NamespaceId: task.namespaceID,
 		Execution: &commonpb.WorkflowExecution{
 			WorkflowId: task.workflowID,
@@ -258,8 +274,11 @@ func (s *Scavenger) handleTask(
 	})
 	switch err.(type) {
 	case nil:
+		if s.enableRetentionVerification() {
+			return s.cleanUpWorkflowPastRetention(ctx, ms.GetDatabaseMutableState())
+		}
 		return nil
-	case *serviceerror.NotFound:
+	case *serviceerror.NotFound, *serviceerror.NamespaceNotFound:
 		// case handled below
 	default:
 		s.logger.Error("encounter error when describing the mutable state", getTaskLoggingTags(err, task)...)
@@ -267,19 +286,12 @@ func (s *Scavenger) handleTask(
 	}
 
 	//deleting history branch
-	var branchToken []byte
-	branchToken, err = persistence.NewHistoryBranchTokenByBranchID(task.treeID, task.branchID)
-	if err != nil {
-		s.logger.Error("encounter error when creating branch token", getTaskLoggingTags(err, task)...)
-		return err
-	}
-
-	err = s.db.DeleteHistoryBranch(&persistence.DeleteHistoryBranchRequest{
+	err = s.db.DeleteHistoryBranch(ctx, &persistence.DeleteHistoryBranchRequest{
 		ShardID:     task.shardID,
-		BranchToken: branchToken,
+		BranchToken: task.branchToken,
 	})
 	if err != nil {
-		s.logger.Error("encounter error when deleting garbage history branch", getTaskLoggingTags(err, task)...)
+		s.logger.Error("encountered error when deleting garbage history branch", getTaskLoggingTags(err, task)...)
 	} else {
 		s.logger.Info("deleted history garbage", getTaskLoggingTags(nil, task)...)
 	}
@@ -292,29 +304,28 @@ func (s *Scavenger) handleErr(
 	s.Lock()
 	defer s.Unlock()
 	if err != nil {
-		s.metrics.IncCounter(metrics.HistoryScavengerScope, metrics.HistoryScavengerErrorCount)
+		s.metricsHandler.Counter(metrics.HistoryScavengerErrorCount.GetMetricName()).Record(1)
 		s.hbd.ErrorCount++
 		return
 	}
 
-	s.metrics.IncCounter(metrics.HistoryScavengerScope, metrics.HistoryScavengerSuccessCount)
+	s.metricsHandler.Counter(metrics.HistoryScavengerSuccessCount.GetMetricName()).Record(1)
 	s.hbd.SuccessCount++
 }
 
-func (s *Scavenger) getPaginationFn() collection.PaginationFn {
-	return func(paginationToken []byte) ([]interface{}, []byte, error) {
+func (s *Scavenger) getPaginationFn(
+	ctx context.Context,
+) collection.PaginationFn[persistence.HistoryBranchDetail] {
+	return func(paginationToken []byte) ([]persistence.HistoryBranchDetail, []byte, error) {
 		req := &persistence.GetAllHistoryTreeBranchesRequest{
 			PageSize:      pageSize,
 			NextPageToken: paginationToken,
 		}
-		resp, err := s.db.GetAllHistoryTreeBranches(req)
+		resp, err := s.db.GetAllHistoryTreeBranches(ctx, req)
 		if err != nil {
 			return nil, nil, err
 		}
-		var paginateItems []interface{}
-		for _, branch := range resp.Branches {
-			paginateItems = append(paginateItems, branch)
-		}
+		paginateItems := resp.Branches
 
 		s.Lock()
 		s.hbd.CurrentPage++
@@ -325,6 +336,57 @@ func (s *Scavenger) getPaginationFn() collection.PaginationFn {
 	}
 }
 
+func (s *Scavenger) cleanUpWorkflowPastRetention(
+	ctx context.Context,
+	mutableState *persistencepb.WorkflowMutableState,
+) error {
+	if mutableState.GetExecutionState().GetState() != enums.WORKFLOW_EXECUTION_STATE_COMPLETED {
+		// Skip running workflow
+		return nil
+	}
+
+	executionInfo := mutableState.GetExecutionInfo()
+	ns, err := s.registry.GetNamespaceByID(namespace.ID(executionInfo.GetNamespaceId()))
+	switch err.(type) {
+	case *serviceerror.NamespaceNotFound:
+		// TODO delete the workflow data after issue #3536 close
+		return nil
+	case nil:
+		// continue to delete
+	default:
+		return err
+	}
+
+	retention := ns.Retention()
+	finalUpdateTime := executionInfo.GetLastUpdateTime()
+	age := time.Now().UTC().Sub(timestamp.TimeValue(finalUpdateTime))
+	if age > retention+s.executionDataDurationBuffer() {
+		_, err = s.adminClient.DeleteWorkflowExecution(ctx, &adminservice.DeleteWorkflowExecutionRequest{
+			Namespace: ns.Name().String(),
+			Execution: &commonpb.WorkflowExecution{
+				WorkflowId: executionInfo.GetWorkflowId(),
+				RunId:      mutableState.GetExecutionState().GetRunId(),
+			},
+		})
+		if err != nil {
+			// This is experimental. Ignoring the error so it will not block the history scavenger.
+			s.logger.Warn("Failed to delete workflow past retention in history scavenger",
+				tag.Error(err),
+				tag.WorkflowNamespace(ns.Name().String()),
+				tag.WorkflowID(executionInfo.GetWorkflowId()),
+				tag.WorkflowRunID(mutableState.GetExecutionState().GetRunId()),
+			)
+			return nil
+		}
+		s.logger.Info("Delete workflow data past retention via history scavenger",
+			tag.WorkflowNamespace(ns.Name().String()),
+			tag.WorkflowID(executionInfo.GetWorkflowId()),
+			tag.WorkflowRunID(mutableState.GetExecutionState().GetRunId()),
+		)
+	}
+	return nil
+}
+
 func getTaskLoggingTags(err error, task taskDetail) []tag.Tag {
 	if err != nil {
 		return []tag.Tag{
@@ -332,15 +394,13 @@ func getTaskLoggingTags(err error, task taskDetail) []tag.Tag {
 			tag.WorkflowNamespaceID(task.namespaceID),
 			tag.WorkflowID(task.workflowID),
 			tag.WorkflowRunID(task.runID),
-			tag.WorkflowTreeID(task.treeID),
-			tag.WorkflowBranchID(task.branchID),
+			tag.WorkflowBranchToken(task.branchToken),
 		}
 	}
 	return []tag.Tag{
 		tag.WorkflowNamespaceID(task.namespaceID),
 		tag.WorkflowID(task.workflowID),
 		tag.WorkflowRunID(task.runID),
-		tag.WorkflowTreeID(task.treeID),
-		tag.WorkflowBranchID(task.branchID),
+		tag.WorkflowBranchToken(task.branchToken),
 	}
 }

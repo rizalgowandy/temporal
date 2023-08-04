@@ -31,25 +31,27 @@ import "dependencies/gogoproto/gogo.proto";
 import "temporal/server/api/enums/v1/replication.proto";
 import "temporal/server/api/enums/v1/task.proto";
 import "temporal/server/api/history/v1/message.proto";
+import "temporal/server/api/persistence/v1/workflow_mutable_state.proto";
+import "temporal/server/api/persistence/v1/task_queues.proto";
 
 import "temporal/api/common/v1/message.proto";
 import "temporal/api/namespace/v1/message.proto";
 import "temporal/api/replication/v1/message.proto";
-import "temporal/api/history/v1/message.proto";
 import "temporal/api/failure/v1/message.proto";
+import "temporal/server/api/workflow/v1/message.proto";
 
 message ReplicationTask {
     temporal.server.api.enums.v1.ReplicationTaskType task_type = 1;
     int64 source_task_id = 2;
+    reserved 4;
+    reserved 7;
     oneof attributes {
         NamespaceTaskAttributes namespace_task_attributes = 3;
-        // TODO: deprecate once NDC migration is done.
-        HistoryTaskAttributes history_task_attributes = 4;
         SyncShardStatusTaskAttributes sync_shard_status_task_attributes = 5;
         SyncActivityTaskAttributes sync_activity_task_attributes = 6;
-        // TODO: deprecate once kafka deprecation is done.
-        HistoryMetadataTaskAttributes history_metadata_task_attributes = 7;
-        HistoryTaskV2Attributes history_task_v2_attributes = 8;
+        HistoryTaskAttributes history_task_attributes = 8;
+        SyncWorkflowStateTaskAttributes sync_workflow_state_task_attributes = 10;
+        TaskQueueUserDataAttributes task_queue_user_data_attributes = 11;
     }
     google.protobuf.Timestamp visibility_time = 9 [(gogoproto.stdtime) = true];
 }
@@ -69,6 +71,11 @@ message SyncShardStatus {
     google.protobuf.Timestamp status_time = 1 [(gogoproto.stdtime) = true];
 }
 
+message SyncReplicationState {
+    int64 inclusive_low_watermark = 1;
+    google.protobuf.Timestamp  inclusive_low_watermark_time = 2 [(gogoproto.stdtime) = true];
+}
+
 message ReplicationMessages {
     repeated ReplicationTask replication_tasks = 1;
     // This can be different than the last taskId in the above list, because sender can decide to skip tasks (e.g. for completed workflows).
@@ -76,6 +83,13 @@ message ReplicationMessages {
     // Hint for flow control.
     bool has_more  = 3;
     SyncShardStatus sync_shard_status = 4;
+}
+
+message WorkflowReplicationMessages {
+    repeated ReplicationTask replication_tasks = 1;
+    // This can be different than the last taskId in the above list, because sender can decide to skip tasks (e.g. for completed workflows).
+    int64 exclusive_high_watermark = 2;
+    google.protobuf.Timestamp  exclusive_high_watermark_time = 3 [(gogoproto.stdtime) = true];
 }
 
 message ReplicationTaskInfo {
@@ -87,7 +101,7 @@ message ReplicationTaskInfo {
     int64 version = 6;
     int64 first_event_id = 7;
     int64 next_event_id = 8;
-    int64 scheduled_id = 9;
+    int64 scheduled_event_id = 9;
 }
 
 message NamespaceTaskAttributes {
@@ -98,33 +112,7 @@ message NamespaceTaskAttributes {
     temporal.api.replication.v1.NamespaceReplicationConfig replication_config = 5;
     int64 config_version = 6;
     int64 failover_version = 7;
-}
-
-message HistoryTaskAttributes {
-    repeated string target_clusters = 1;
-    string namespace_id = 2;
-    string workflow_id = 3;
-    string run_id = 4;
-    int64 first_event_id = 5;
-    int64 next_event_id = 6;
-    int64 version = 7;
-    reserved 8;
-    temporal.api.history.v1.History history = 9;
-    temporal.api.history.v1.History new_run_history = 10;
-    reserved 11;
-    reserved 12;
-    reserved 13;
-    reserved 14;
-}
-
-message HistoryMetadataTaskAttributes {
-    repeated string target_clusters = 1;
-    string namespace_id = 2;
-    string workflow_id = 3;
-    string run_id = 4;
-    int64 first_event_id = 5;
-    int64 next_event_id = 6;
-    int64 version = 7;
+    repeated temporal.api.replication.v1.FailoverStatus failover_history = 8;
 }
 
 message SyncShardStatusTaskAttributes {
@@ -138,9 +126,9 @@ message SyncActivityTaskAttributes {
     string workflow_id = 2;
     string run_id = 3;
     int64 version = 4;
-    int64 scheduled_id = 5;
+    int64 scheduled_event_id = 5;
     google.protobuf.Timestamp scheduled_time = 6 [(gogoproto.stdtime) = true];
-    int64 started_id = 7;
+    int64 started_event_id = 7;
     google.protobuf.Timestamp started_time = 8 [(gogoproto.stdtime) = true];
     google.protobuf.Timestamp last_heartbeat_time = 9 [(gogoproto.stdtime) = true];
     temporal.api.common.v1.Payloads details = 10;
@@ -148,9 +136,10 @@ message SyncActivityTaskAttributes {
     temporal.api.failure.v1.Failure last_failure = 12;
     string last_worker_identity = 13;
     temporal.server.api.history.v1.VersionHistory version_history = 14;
+    temporal.server.api.workflow.v1.BaseExecutionInfo base_execution_info = 15;
 }
 
-message HistoryTaskV2Attributes {
+message HistoryTaskAttributes {
     reserved 1;
     string namespace_id = 2;
     string workflow_id = 3;
@@ -159,4 +148,16 @@ message HistoryTaskV2Attributes {
     temporal.api.common.v1.DataBlob events = 6;
     // New run events does not need version history since there is no prior events.
     temporal.api.common.v1.DataBlob new_run_events = 7;
+    temporal.server.api.workflow.v1.BaseExecutionInfo base_execution_info = 8;
+
+}
+
+message SyncWorkflowStateTaskAttributes {
+    temporal.server.api.persistence.v1.WorkflowMutableState workflow_state = 1;
+}
+
+message TaskQueueUserDataAttributes {
+    string namespace_id = 1;
+    string task_queue_name = 2;
+    temporal.server.api.persistence.v1.TaskQueueUserData user_data = 3;
 }

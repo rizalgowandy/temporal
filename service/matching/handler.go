@@ -29,28 +29,30 @@ import (
 	"sync"
 	"time"
 
-	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
-	healthpb "google.golang.org/grpc/health/grpc_health_v1"
 
+	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/membership"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/persistence/visibility/manager"
 )
 
 type (
 	// Handler - gRPC handler interface for matchingservice
 	Handler struct {
-		resource.Resource
-
-		engine        Engine
-		config        *Config
-		metricsClient metrics.Client
-		logger        log.Logger
-		startWG       sync.WaitGroup
+		engine            Engine
+		config            *Config
+		metricsHandler    metrics.Handler
+		logger            log.Logger
+		startWG           sync.WaitGroup
+		throttledLogger   log.Logger
+		namespaceRegistry namespace.Registry
 	}
 )
 
@@ -60,31 +62,43 @@ const (
 
 var (
 	_ matchingservice.MatchingServiceServer = (*Handler)(nil)
-
-	errMatchingHostThrottle = serviceerror.NewResourceExhausted("Matching host RPS exceeded.")
 )
 
 // NewHandler creates a gRPC handler for the matchingservice
 func NewHandler(
-	resource resource.Resource,
 	config *Config,
+	logger log.Logger,
+	throttledLogger log.Logger,
+	taskManager persistence.TaskManager,
+	historyClient historyservice.HistoryServiceClient,
+	matchingRawClient matchingservice.MatchingServiceClient,
+	matchingServiceResolver membership.ServiceResolver,
+	metricsHandler metrics.Handler,
+	namespaceRegistry namespace.Registry,
+	clusterMetadata cluster.Metadata,
+	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
+	visibilityManager manager.VisibilityManager,
 ) *Handler {
 	handler := &Handler{
-		Resource:      resource,
-		config:        config,
-		metricsClient: resource.GetMetricsClient(),
-		logger:        resource.GetLogger(),
+		config:          config,
+		metricsHandler:  metricsHandler,
+		logger:          logger,
+		throttledLogger: throttledLogger,
 		engine: NewEngine(
-			resource.GetTaskManager(),
-			resource.GetHistoryClient(),
-			resource.GetMatchingRawClient(), // Use non retry client inside matching
+			taskManager,
+			historyClient,
+			matchingRawClient, // Use non retry client inside matching
 			config,
-			resource.GetLogger(),
-			resource.GetMetricsClient(),
-			resource.GetNamespaceRegistry(),
-			resource.GetMatchingServiceResolver(),
-			resource.GetClusterMetadata(),
+			logger,
+			throttledLogger,
+			metricsHandler,
+			namespaceRegistry,
+			matchingServiceResolver,
+			clusterMetadata,
+			namespaceReplicationQueue,
+			visibilityManager,
 		),
+		namespaceRegistry: namespaceRegistry,
 	}
 
 	// prevent from serving requests before matching engine is started and ready
@@ -95,6 +109,7 @@ func NewHandler(
 
 // Start starts the handler
 func (h *Handler) Start() {
+	h.engine.Start()
 	h.startWG.Done()
 }
 
@@ -103,41 +118,16 @@ func (h *Handler) Stop() {
 	h.engine.Stop()
 }
 
-// Check is from: https://github.com/grpc/grpc/blob/master/doc/health-checking.md
-func (h *Handler) Check(_ context.Context, request *healthpb.HealthCheckRequest) (*healthpb.HealthCheckResponse, error) {
-	h.GetLogger().Debug("Matching service health check endpoint (gRPC) reached.")
-
-	h.startWG.Wait()
-
-	if request.Service != serviceName {
-		return &healthpb.HealthCheckResponse{
-			Status: healthpb.HealthCheckResponse_SERVICE_UNKNOWN,
-		}, nil
-	}
-
-	hs := &healthpb.HealthCheckResponse{
-		Status: healthpb.HealthCheckResponse_SERVING,
-	}
-	return hs, nil
-}
-func (h *Handler) Watch(*healthpb.HealthCheckRequest, healthpb.Health_WatchServer) error {
-	return serviceerror.NewUnimplemented("Watch is not implemented.")
-}
-
-func (h *Handler) newHandlerContext(
-	ctx context.Context,
+func (h *Handler) opMetricsHandler(
 	namespaceID namespace.ID,
 	taskQueue *taskqueuepb.TaskQueue,
-	scope int,
-) *handlerContext {
-	return newHandlerContext(
-		ctx,
-		h.namespaceName(namespaceID),
-		taskQueue,
-		h.metricsClient,
-		scope,
-		h.logger,
-	)
+	operation string,
+) metrics.Handler {
+	return metrics.GetPerTaskQueueScope(
+		h.metricsHandler.WithTags(metrics.OperationTag(operation)),
+		h.namespaceName(namespaceID).String(),
+		taskQueue.GetName(),
+		taskQueue.GetKind())
 }
 
 // AddActivityTask - adds an activity task.
@@ -145,22 +135,21 @@ func (h *Handler) AddActivityTask(
 	ctx context.Context,
 	request *matchingservice.AddActivityTaskRequest,
 ) (_ *matchingservice.AddActivityTaskResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
+	defer log.CapturePanic(h.logger, &retError)
 	startT := time.Now().UTC()
-	hCtx := h.newHandlerContext(
-		ctx,
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetTaskQueue(),
 		metrics.MatchingAddActivityTaskScope,
 	)
 
 	if request.GetForwardedSource() != "" {
-		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
+		h.reportForwardedPerTaskQueueCounter(opMetrics, namespace.ID(request.GetNamespaceId()))
 	}
 
-	syncMatch, err := h.engine.AddActivityTask(hCtx, request)
+	syncMatch, err := h.engine.AddActivityTask(ctx, request)
 	if syncMatch {
-		hCtx.scope.RecordTimer(metrics.SyncMatchLatencyPerTaskQueue, time.Since(startT))
+		opMetrics.Timer(metrics.SyncMatchLatencyPerTaskQueue.GetMetricName()).Record(time.Since(startT))
 	}
 
 	return &matchingservice.AddActivityTaskResponse{}, err
@@ -171,22 +160,21 @@ func (h *Handler) AddWorkflowTask(
 	ctx context.Context,
 	request *matchingservice.AddWorkflowTaskRequest,
 ) (_ *matchingservice.AddWorkflowTaskResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
+	defer log.CapturePanic(h.logger, &retError)
 	startT := time.Now().UTC()
-	hCtx := h.newHandlerContext(
-		ctx,
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetTaskQueue(),
 		metrics.MatchingAddWorkflowTaskScope,
 	)
 
 	if request.GetForwardedSource() != "" {
-		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
+		h.reportForwardedPerTaskQueueCounter(opMetrics, namespace.ID(request.GetNamespaceId()))
 	}
 
-	syncMatch, err := h.engine.AddWorkflowTask(hCtx, request)
+	syncMatch, err := h.engine.AddWorkflowTask(ctx, request)
 	if syncMatch {
-		hCtx.scope.RecordTimer(metrics.SyncMatchLatencyPerTaskQueue, time.Since(startT))
+		opMetrics.Timer(metrics.SyncMatchLatencyPerTaskQueue.GetMetricName()).Record(time.Since(startT))
 	}
 	return &matchingservice.AddWorkflowTaskResponse{}, err
 }
@@ -196,28 +184,26 @@ func (h *Handler) PollActivityTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollActivityTaskQueueRequest,
 ) (_ *matchingservice.PollActivityTaskQueueResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
+	defer log.CapturePanic(h.logger, &retError)
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetPollRequest().GetTaskQueue(),
 		metrics.MatchingPollActivityTaskQueueScope,
 	)
 
 	if request.GetForwardedSource() != "" {
-		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
+		h.reportForwardedPerTaskQueueCounter(opMetrics, namespace.ID(request.GetNamespaceId()))
 	}
 
 	if _, err := common.ValidateLongPollContextTimeoutIsSet(
 		ctx,
 		"PollActivityTaskQueue",
-		h.Resource.GetThrottledLogger(),
+		h.throttledLogger,
 	); err != nil {
 		return nil, err
 	}
 
-	response, err := h.engine.PollActivityTaskQueue(hCtx, request)
-	return response, err
+	return h.engine.PollActivityTaskQueue(ctx, request, opMetrics)
 }
 
 // PollWorkflowTaskQueue - long poll for a workflow task.
@@ -225,28 +211,26 @@ func (h *Handler) PollWorkflowTaskQueue(
 	ctx context.Context,
 	request *matchingservice.PollWorkflowTaskQueueRequest,
 ) (_ *matchingservice.PollWorkflowTaskQueueResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
+	defer log.CapturePanic(h.logger, &retError)
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetPollRequest().GetTaskQueue(),
 		metrics.MatchingPollWorkflowTaskQueueScope,
 	)
 
 	if request.GetForwardedSource() != "" {
-		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
+		h.reportForwardedPerTaskQueueCounter(opMetrics, namespace.ID(request.GetNamespaceId()))
 	}
 
 	if _, err := common.ValidateLongPollContextTimeoutIsSet(
 		ctx,
 		"PollWorkflowTaskQueue",
-		h.Resource.GetThrottledLogger(),
+		h.throttledLogger,
 	); err != nil {
 		return nil, err
 	}
 
-	response, err := h.engine.PollWorkflowTaskQueue(hCtx, request)
-	return response, err
+	return h.engine.PollWorkflowTaskQueue(ctx, request, opMetrics)
 }
 
 // QueryWorkflow queries a given workflow synchronously and return the query result.
@@ -254,20 +238,18 @@ func (h *Handler) QueryWorkflow(
 	ctx context.Context,
 	request *matchingservice.QueryWorkflowRequest,
 ) (_ *matchingservice.QueryWorkflowResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
+	defer log.CapturePanic(h.logger, &retError)
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetTaskQueue(),
 		metrics.MatchingQueryWorkflowScope,
 	)
 
 	if request.GetForwardedSource() != "" {
-		h.reportForwardedPerTaskQueueCounter(hCtx, namespace.ID(request.GetNamespaceId()))
+		h.reportForwardedPerTaskQueueCounter(opMetrics, namespace.ID(request.GetNamespaceId()))
 	}
 
-	response, err := h.engine.QueryWorkflow(hCtx, request)
-	return response, err
+	return h.engine.QueryWorkflow(ctx, request)
 }
 
 // RespondQueryTaskCompleted responds a query task completed
@@ -275,30 +257,22 @@ func (h *Handler) RespondQueryTaskCompleted(
 	ctx context.Context,
 	request *matchingservice.RespondQueryTaskCompletedRequest,
 ) (_ *matchingservice.RespondQueryTaskCompletedResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
+	defer log.CapturePanic(h.logger, &retError)
+	opMetrics := h.opMetricsHandler(
 		namespace.ID(request.GetNamespaceId()),
 		request.GetTaskQueue(),
 		metrics.MatchingRespondQueryTaskCompletedScope,
 	)
 
-	err := h.engine.RespondQueryTaskCompleted(hCtx, request)
+	err := h.engine.RespondQueryTaskCompleted(ctx, request, opMetrics)
 	return &matchingservice.RespondQueryTaskCompletedResponse{}, err
 }
 
 // CancelOutstandingPoll is used to cancel outstanding pollers
 func (h *Handler) CancelOutstandingPoll(ctx context.Context,
 	request *matchingservice.CancelOutstandingPollRequest) (_ *matchingservice.CancelOutstandingPollResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
-		namespace.ID(request.GetNamespaceId()),
-		request.GetTaskQueue(),
-		metrics.MatchingCancelOutstandingPollScope,
-	)
-
-	err := h.engine.CancelOutstandingPoll(hCtx, request)
+	defer log.CapturePanic(h.logger, &retError)
+	err := h.engine.CancelOutstandingPoll(ctx, request)
 	return &matchingservice.CancelOutstandingPollResponse{}, err
 }
 
@@ -309,16 +283,8 @@ func (h *Handler) DescribeTaskQueue(
 	ctx context.Context,
 	request *matchingservice.DescribeTaskQueueRequest,
 ) (_ *matchingservice.DescribeTaskQueueResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := h.newHandlerContext(
-		ctx,
-		namespace.ID(request.GetNamespaceId()),
-		request.GetDescRequest().GetTaskQueue(),
-		metrics.MatchingDescribeTaskQueueScope,
-	)
-
-	response, err := h.engine.DescribeTaskQueue(hCtx, request)
-	return response, err
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.DescribeTaskQueue(ctx, request)
 }
 
 // ListTaskQueuePartitions returns information about partitions for a taskQueue
@@ -326,33 +292,90 @@ func (h *Handler) ListTaskQueuePartitions(
 	ctx context.Context,
 	request *matchingservice.ListTaskQueuePartitionsRequest,
 ) (_ *matchingservice.ListTaskQueuePartitionsResponse, retError error) {
-	defer log.CapturePanic(h.GetLogger(), &retError)
-	hCtx := newHandlerContext(
-		ctx,
-		namespace.Name(request.GetNamespace()),
-		request.GetTaskQueue(),
-		h.metricsClient,
-		metrics.MatchingListTaskQueuePartitionsScope,
-		h.logger,
-	)
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.ListTaskQueuePartitions(ctx, request)
+}
 
-	response, err := h.engine.ListTaskQueuePartitions(hCtx, request)
-	return response, err
+// UpdateWorkerBuildIdCompatibility allows changing the worker versioning graph for a task queue
+func (h *Handler) UpdateWorkerBuildIdCompatibility(
+	ctx context.Context,
+	request *matchingservice.UpdateWorkerBuildIdCompatibilityRequest,
+) (_ *matchingservice.UpdateWorkerBuildIdCompatibilityResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.UpdateWorkerBuildIdCompatibility(ctx, request)
+}
+
+// GetWorkerBuildIdCompatibility fetches the worker versioning data for a task queue
+func (h *Handler) GetWorkerBuildIdCompatibility(
+	ctx context.Context,
+	request *matchingservice.GetWorkerBuildIdCompatibilityRequest,
+) (_ *matchingservice.GetWorkerBuildIdCompatibilityResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.GetWorkerBuildIdCompatibility(ctx, request)
+}
+
+func (h *Handler) GetTaskQueueUserData(
+	ctx context.Context,
+	request *matchingservice.GetTaskQueueUserDataRequest,
+) (_ *matchingservice.GetTaskQueueUserDataResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.GetTaskQueueUserData(ctx, request)
+}
+
+func (h *Handler) ApplyTaskQueueUserDataReplicationEvent(
+	ctx context.Context,
+	request *matchingservice.ApplyTaskQueueUserDataReplicationEventRequest,
+) (_ *matchingservice.ApplyTaskQueueUserDataReplicationEventResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.ApplyTaskQueueUserDataReplicationEvent(ctx, request)
+}
+
+func (h *Handler) GetBuildIdTaskQueueMapping(
+	ctx context.Context,
+	request *matchingservice.GetBuildIdTaskQueueMappingRequest,
+) (_ *matchingservice.GetBuildIdTaskQueueMappingResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.GetBuildIdTaskQueueMapping(ctx, request)
+}
+
+func (h *Handler) ForceUnloadTaskQueue(
+	ctx context.Context,
+	request *matchingservice.ForceUnloadTaskQueueRequest,
+) (_ *matchingservice.ForceUnloadTaskQueueResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.ForceUnloadTaskQueue(ctx, request)
+}
+
+func (h *Handler) UpdateTaskQueueUserData(
+	ctx context.Context,
+	request *matchingservice.UpdateTaskQueueUserDataRequest,
+) (_ *matchingservice.UpdateTaskQueueUserDataResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.UpdateTaskQueueUserData(ctx, request)
+}
+
+func (h *Handler) ReplicateTaskQueueUserData(
+	ctx context.Context,
+	request *matchingservice.ReplicateTaskQueueUserDataRequest,
+) (_ *matchingservice.ReplicateTaskQueueUserDataResponse, retError error) {
+	defer log.CapturePanic(h.logger, &retError)
+	return h.engine.ReplicateTaskQueueUserData(ctx, request)
 }
 
 func (h *Handler) namespaceName(id namespace.ID) namespace.Name {
-	entry, err := h.GetNamespaceRegistry().GetNamespaceByID(id)
+	entry, err := h.namespaceRegistry.GetNamespaceByID(id)
 	if err != nil {
 		return ""
 	}
 	return entry.Name()
 }
 
-func (h *Handler) reportForwardedPerTaskQueueCounter(hCtx *handlerContext, namespaceId namespace.ID) {
-	hCtx.scope.IncCounter(metrics.ForwardedPerTaskQueueCounter)
-	h.GetMetricsClient().
-		Scope(metrics.MatchingAddWorkflowTaskScope).
-		Tagged(metrics.NamespaceTag(h.namespaceName(namespaceId).String())).
-		Tagged(metrics.ServiceRoleTag(metrics.MatchingRoleTagValue)).
-		IncCounter(metrics.MatchingClientForwardedCounter)
+func (h *Handler) reportForwardedPerTaskQueueCounter(opMetrics metrics.Handler, namespaceId namespace.ID) {
+	opMetrics.Counter(metrics.ForwardedPerTaskQueueCounter.GetMetricName()).Record(1)
+	h.metricsHandler.Counter(metrics.MatchingClientForwardedCounter.GetMetricName()).
+		Record(
+			1,
+			metrics.OperationTag(metrics.MatchingAddWorkflowTaskScope),
+			metrics.NamespaceTag(h.namespaceName(namespaceId).String()),
+			metrics.ServiceRoleTag(metrics.MatchingRoleTagValue))
 }

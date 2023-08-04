@@ -63,3 +63,15 @@ func SetDefaultContinueAsNewInitiator(f *enumspb.ContinueAsNewInitiator) {
 		*f = enumspb.CONTINUE_AS_NEW_INITIATOR_WORKFLOW
 	}
 }
+
+func SetDefaultResetReapplyType(f *enumspb.ResetReapplyType) {
+	if *f == enumspb.RESET_REAPPLY_TYPE_UNSPECIFIED {
+		*f = enumspb.RESET_REAPPLY_TYPE_SIGNAL
+	}
+}
+
+func SetDefaultUpdateWorkflowExecutionLifecycleStage(f *enumspb.UpdateWorkflowExecutionLifecycleStage) {
+	if *f == enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_UNSPECIFIED {
+		*f = enumspb.UPDATE_WORKFLOW_EXECUTION_LIFECYCLE_STAGE_COMPLETED
+	}
+}

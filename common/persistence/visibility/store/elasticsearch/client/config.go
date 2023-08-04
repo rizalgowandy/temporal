@@ -25,6 +25,7 @@
 package client
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"time"
@@ -32,17 +33,18 @@ import (
 
 const (
 	// VisibilityAppName is used to find ES indexName for visibility
-	VisibilityAppName = "visibility"
+	VisibilityAppName          = "visibility"
+	SecondaryVisibilityAppName = "secondary_visibility"
 )
 
 // Config for connecting to Elasticsearch
 type (
 	Config struct {
 		Version                      string                    `yaml:"version"`
-		URL                          url.URL                   `yaml:"url"` //nolint:govet
+		URL                          url.URL                   `yaml:"url"`
 		Username                     string                    `yaml:"username"`
 		Password                     string                    `yaml:"password"`
-		Indices                      map[string]string         `yaml:"indices"` //nolint:govet
+		Indices                      map[string]string         `yaml:"indices"`
 		LogLevel                     string                    `yaml:"logLevel"`
 		AWSRequestSigning            ESAWSRequestSigningConfig `yaml:"aws-request-signing"`
 		CloseIdleConnectionsInterval time.Duration             `yaml:"closeIdleConnectionsInterval"`
@@ -86,17 +88,22 @@ func (cfg *Config) GetVisibilityIndex() string {
 	return cfg.Indices[VisibilityAppName]
 }
 
-func (cfg *Config) Validate(storeName string) error {
+func (cfg *Config) GetSecondaryVisibilityIndex() string {
 	if cfg == nil {
-		return fmt.Errorf("persistence config: advanced visibility datastore %q: must provide config for \"elasticsearch\"", storeName)
+		return ""
 	}
+	return cfg.Indices[SecondaryVisibilityAppName]
+}
 
+func (cfg *Config) Validate() error {
+	if cfg == nil {
+		return errors.New("elasticsearch config: config not found")
+	}
 	if len(cfg.Indices) < 1 {
-		return fmt.Errorf("persistence config: advanced visibility datastore %q: missing indices", storeName)
-
+		return errors.New("elasticsearch config: missing indices")
 	}
 	if cfg.Indices[VisibilityAppName] == "" {
-		return fmt.Errorf("persistence config: advanced visibility datastore %q indices configuration: missing %q key", storeName, VisibilityAppName)
+		return fmt.Errorf("elasticsearch config: indices configuration: missing %q key", VisibilityAppName)
 	}
 	return nil
 }

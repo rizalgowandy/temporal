@@ -27,11 +27,15 @@ package configs
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"golang.org/x/exp/slices"
 
 	"go.temporal.io/server/api/matchingservice/v1"
+	"go.temporal.io/server/common/headers"
+	"go.temporal.io/server/common/quotas"
 )
 
 type (
@@ -60,11 +64,16 @@ func (s *quotasSuite) TearDownTest() {
 }
 
 func (s *quotasSuite) TestAPIToPriorityMapping() {
-	mapping := make(map[int]struct{})
 	for _, priority := range APIToPriority {
-		mapping[priority] = struct{}{}
+		index := slices.Index(APIPrioritiesOrdered, priority)
+		s.NotEqual(-1, index)
 	}
-	s.Equal(mapping, APIPriorities)
+}
+
+func (s *quotasSuite) TestAPIPrioritiesOrdered() {
+	for idx := range APIPrioritiesOrdered[1:] {
+		s.True(APIPrioritiesOrdered[idx] < APIPrioritiesOrdered[idx+1])
+	}
 }
 
 func (s *quotasSuite) TestAPIs() {
@@ -76,4 +85,37 @@ func (s *quotasSuite) TestAPIs() {
 		apiToPriority[apiName] = APIToPriority[apiName]
 	}
 	s.Equal(apiToPriority, APIToPriority)
+}
+
+func (s *quotasSuite) TestOperatorPrioritized() {
+	rateFn := func() float64 { return 5 }
+	operatorRPSRatioFn := func() float64 { return 0.2 }
+	limiter := NewPriorityRateLimiter(rateFn, operatorRPSRatioFn)
+
+	operatorRequest := quotas.NewRequest(
+		"QueryWorkflow",
+		1,
+		"",
+		headers.CallerTypeOperator,
+		-1,
+		"")
+
+	apiRequest := quotas.NewRequest(
+		"QueryWorkflow",
+		1,
+		"",
+		headers.CallerTypeAPI,
+		-1,
+		"")
+
+	requestTime := time.Now()
+	limitCount := 0
+
+	for i := 0; i < 12; i++ {
+		if !limiter.Allow(requestTime, apiRequest) {
+			limitCount++
+			s.True(limiter.Allow(requestTime, operatorRequest))
+		}
+	}
+	s.Equal(2, limitCount)
 }

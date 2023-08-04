@@ -41,12 +41,14 @@ func RunTool(args []string) error {
 	return app.Run(args)
 }
 
+var osExit = os.Exit
+
 // root handler for all cli commands
 func cliHandler(c *cli.Context, handler func(c *cli.Context, logger log.Logger) error, logger log.Logger) {
 	quiet := c.GlobalBool(schema.CLIOptQuiet)
 	err := handler(c, logger)
 	if err != nil && !quiet {
-		os.Exit(1)
+		osExit(1)
 	}
 }
 
@@ -101,11 +103,27 @@ func buildCLIOptions() *cli.App {
 			Usage:  "enable NetworkTopologyStrategy by providing datacenter name",
 			EnvVar: "CASSANDRA_DATACENTER",
 		},
+		cli.StringFlag{
+			Name:   schema.CLIOptAddressTranslator,
+			Value:  "",
+			Usage:  "name of address translator for cassandra hosts",
+			EnvVar: "CASSANDRA_ADDRESS_TRANSLATOR",
+		},
+		cli.StringFlag{
+			Name:   schema.CLIOptAddressTranslatorOptions,
+			Value:  "",
+			Usage:  "colon-separated list of key=value pairs as options for address translator",
+			EnvVar: "CASSANDRA_ADDRESS_TRANSLATOR_OPTIONS_CLI",
+		},
 		cli.BoolFlag{
 			Name:  schema.CLIFlagQuiet,
 			Usage: "Don't set exit status to 1 on error",
 		},
-
+		cli.BoolFlag{
+			Name:   schema.CLIFlagDisableInitialHostLookup,
+			Usage:  "instructs gocql driver to only connect to the supplied hosts vs. attempting to lookup additional hosts via the system.peers table",
+			EnvVar: "CASSANDRA_DISABLE_INITIAL_HOST_LOOKUP",
+		},
 		cli.BoolFlag{
 			Name:   schema.CLIFlagEnableTLS,
 			Usage:  "enable TLS",

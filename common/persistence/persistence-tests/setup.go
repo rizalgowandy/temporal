@@ -28,17 +28,26 @@ import (
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql"
+	"go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"
 	"go.temporal.io/server/environment"
 )
 
 const (
-	testMySQLUser      = "temporal"
-	testMySQLPassword  = "temporal"
-	testMySQLSchemaDir = "schema/mysql/v57"
+	testMySQLUser       = "temporal"
+	testMySQLPassword   = "temporal"
+	testMySQLSchemaDir  = "schema/mysql/v57"
+	testMySQL8SchemaDir = "schema/mysql/v8"
 
-	testPostgreSQLUser      = "temporal"
-	testPostgreSQLPassword  = "temporal"
-	testPostgreSQLSchemaDir = "schema/postgresql/v96"
+	testPostgreSQLUser        = "temporal"
+	testPostgreSQLPassword    = "temporal"
+	testPostgreSQLSchemaDir   = "schema/postgresql/v96"
+	testPostgreSQL12SchemaDir = "schema/postgresql/v12"
+
+	testSQLiteUser      = ""
+	testSQLitePassword  = ""
+	testSQLiteMode      = "memory"
+	testSQLiteCache     = "private"
+	testSQLiteSchemaDir = "schema/sqlite/v3" // specify if mode is not "memory"
 )
 
 // GetMySQLTestClusterOption return test options
@@ -54,6 +63,19 @@ func GetMySQLTestClusterOption() *TestBaseOptions {
 	}
 }
 
+// GetMySQL8TestClusterOption return test options
+func GetMySQL8TestClusterOption() *TestBaseOptions {
+	return &TestBaseOptions{
+		SQLDBPluginName: mysql.PluginNameV8,
+		DBUsername:      testMySQLUser,
+		DBPassword:      testMySQLPassword,
+		DBHost:          environment.GetMySQLAddress(),
+		DBPort:          environment.GetMySQLPort(),
+		SchemaDir:       testMySQL8SchemaDir,
+		StoreType:       config.StoreTypeSQL,
+	}
+}
+
 // GetPostgreSQLTestClusterOption return test options
 func GetPostgreSQLTestClusterOption() *TestBaseOptions {
 	return &TestBaseOptions{
@@ -64,5 +86,46 @@ func GetPostgreSQLTestClusterOption() *TestBaseOptions {
 		DBPort:          environment.GetPostgreSQLPort(),
 		SchemaDir:       testPostgreSQLSchemaDir,
 		StoreType:       config.StoreTypeSQL,
+	}
+}
+
+// GetPostgreSQL12TestClusterOption return test options
+func GetPostgreSQL12TestClusterOption() *TestBaseOptions {
+	return &TestBaseOptions{
+		SQLDBPluginName: postgresql.PluginNameV12,
+		DBUsername:      testPostgreSQLUser,
+		DBPassword:      testPostgreSQLPassword,
+		DBHost:          environment.GetPostgreSQLAddress(),
+		DBPort:          environment.GetPostgreSQLPort(),
+		SchemaDir:       testPostgreSQL12SchemaDir,
+		StoreType:       config.StoreTypeSQL,
+	}
+}
+
+// GetSQLiteTestClusterOption return test options
+func GetSQLiteFileTestClusterOption() *TestBaseOptions {
+	return &TestBaseOptions{
+		SQLDBPluginName:   sqlite.PluginName,
+		DBUsername:        testSQLiteUser,
+		DBPassword:        testSQLitePassword,
+		DBHost:            environment.Localhost,
+		DBPort:            0,
+		SchemaDir:         testSQLiteSchemaDir,
+		StoreType:         config.StoreTypeSQL,
+		ConnectAttributes: map[string]string{"cache": testSQLiteCache},
+	}
+}
+
+// GetSQLiteTestClusterOption return test options
+func GetSQLiteMemoryTestClusterOption() *TestBaseOptions {
+	return &TestBaseOptions{
+		SQLDBPluginName:   sqlite.PluginName,
+		DBUsername:        testSQLiteUser,
+		DBPassword:        testSQLitePassword,
+		DBHost:            environment.Localhost,
+		DBPort:            0,
+		SchemaDir:         "",
+		StoreType:         config.StoreTypeSQL,
+		ConnectAttributes: map[string]string{"mode": testSQLiteMode, "cache": testSQLiteCache},
 	}
 }

@@ -28,7 +28,9 @@ import (
 	"context"
 	"time"
 
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/server/common/headers"
 	"google.golang.org/grpc"
 
 	"go.temporal.io/server/common/namespace"
@@ -40,7 +42,7 @@ const (
 )
 
 var (
-	ErrNamespaceRateLimitServerBusy = serviceerror.NewResourceExhausted("namespace rate limit exceeded")
+	ErrNamespaceRateLimitServerBusy = serviceerror.NewResourceExhausted(enumspb.RESOURCE_EXHAUSTED_CAUSE_RPS_LIMIT, "namespace rate limit exceeded")
 )
 
 type (
@@ -71,17 +73,20 @@ func (ni *NamespaceRateLimitInterceptor) Intercept(
 	info *grpc.UnaryServerInfo,
 	handler grpc.UnaryHandler,
 ) (interface{}, error) {
-	_, methodName := splitMethodName(info.FullMethod)
+	_, methodName := SplitMethodName(info.FullMethod)
 	token, ok := ni.tokens[methodName]
 	if !ok {
 		token = NamespaceRateLimitDefaultToken
 	}
 
-	namespace := GetNamespace(ni.namespaceRegistry, req)
+	namespace := MustGetNamespaceName(ni.namespaceRegistry, req)
 	if !ni.rateLimiter.Allow(time.Now().UTC(), quotas.NewRequest(
 		methodName,
 		token,
 		namespace.String(),
+		headers.GetValues(ctx, headers.CallerTypeHeaderName)[0],
+		0,  // this interceptor layer does not throttle based on caller segment
+		"", // this interceptor layer does not throttle based on call initiation
 	)) {
 		return nil, ErrNamespaceRateLimitServerBusy
 	}

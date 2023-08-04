@@ -25,7 +25,9 @@
 package sql
 
 import (
+	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"math"
 
@@ -39,15 +41,15 @@ import (
 
 const (
 	// NOTE: transaction ID is *= -1 in DB
-	MinTxnID = math.MaxInt64
+	MinTxnID int64 = math.MaxInt64
+	MaxTxnID int64 = math.MinInt64 + 1 // int overflow
 )
 
 // AppendHistoryNodes add(or override) a node to a history branch
 func (m *sqlExecutionStore) AppendHistoryNodes(
+	ctx context.Context,
 	request *p.InternalAppendHistoryNodesRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	branchInfo := request.BranchInfo
 	node := request.Node
 
@@ -73,13 +75,19 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 
 	if !request.IsNewBranch {
 		_, err = m.Db.InsertIntoHistoryNode(ctx, nodeRow)
-		if err != nil {
+		switch err {
+		case nil:
+			return nil
+		case context.DeadlineExceeded, context.Canceled:
+			return &p.AppendHistoryTimeoutError{
+				Msg: err.Error(),
+			}
+		default:
 			if m.Db.IsDupEntryError(err) {
 				return &p.ConditionFailedError{Msg: fmt.Sprintf("AppendHistoryNodes: row already exist: %v", err)}
 			}
 			return serviceerror.NewUnavailable(fmt.Sprintf("AppendHistoryNodes: %v", err))
 		}
-		return nil
 	}
 
 	treeInfoBlob := request.TreeInfo
@@ -100,30 +108,35 @@ func (m *sqlExecutionStore) AppendHistoryNodes(
 		if err != nil {
 			return err
 		}
-		if rowsAffected != 1 {
-			return fmt.Errorf("expected 1 row to be affected for node table, got %v", rowsAffected)
+		if !(rowsAffected == 1 || rowsAffected == 2) {
+			return fmt.Errorf("expected 1 or 2 row to be affected for node table, got %v", rowsAffected)
 		}
 
 		result, err = tx.InsertIntoHistoryTree(ctx, treeRow)
-		if err != nil {
-			return err
+		switch err {
+		case nil:
+			rowsAffected, err = result.RowsAffected()
+			if err != nil {
+				return err
+			}
+			if !(rowsAffected == 1 || rowsAffected == 2) {
+				return fmt.Errorf("expected 1 or 2 rows to be affected for tree table as we allow upserts, got %v", rowsAffected)
+			}
+			return nil
+		case context.DeadlineExceeded, context.Canceled:
+			return &p.AppendHistoryTimeoutError{
+				Msg: err.Error(),
+			}
+		default:
+			return serviceerror.NewUnavailable(fmt.Sprintf("AppendHistoryNodes: %v", err))
 		}
-		rowsAffected, err = result.RowsAffected()
-		if err != nil {
-			return err
-		}
-		if !(rowsAffected == 1 || rowsAffected == 2) {
-			return fmt.Errorf("expected 1 or 2 rows to be affected for tree table as we allow upserts, got %v", rowsAffected)
-		}
-		return nil
 	})
 }
 
 func (m *sqlExecutionStore) DeleteHistoryNodes(
+	ctx context.Context,
 	request *p.InternalDeleteHistoryNodesRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	branchInfo := request.BranchInfo
 	nodeID := request.NodeID
 	txnID := request.TransactionID
@@ -131,7 +144,7 @@ func (m *sqlExecutionStore) DeleteHistoryNodes(
 
 	if nodeID < p.GetBeginNodeID(branchInfo) {
 		return &p.InvalidPersistenceRequestError{
-			Msg: fmt.Sprintf("cannot append to ancestors' nodes"),
+			Msg: "cannot append to ancestors' nodes",
 		}
 	}
 
@@ -161,30 +174,29 @@ func (m *sqlExecutionStore) DeleteHistoryNodes(
 
 // ReadHistoryBranch returns history node data for a branch
 func (m *sqlExecutionStore) ReadHistoryBranch(
+	ctx context.Context,
 	request *p.InternalReadHistoryBranchRequest,
 ) (*p.InternalReadHistoryBranchResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+	branch, err := m.GetHistoryBranchUtil().ParseHistoryBranchInfo(request.BranchToken)
+	if err != nil {
+		return nil, err
+	}
 	branchIDBytes, err := primitives.ParseUUID(request.BranchID)
 	if err != nil {
 		return nil, err
 	}
-	treeIDBytes, err := primitives.ParseUUID(request.TreeID)
+	treeIDBytes, err := primitives.ParseUUID(branch.TreeId)
 	if err != nil {
 		return nil, err
 	}
 
 	var token historyNodePaginationToken
 	if len(request.NextPageToken) == 0 {
-		token = newHistoryNodePaginationToken(request.MinNodeID, MinTxnID)
-	} else if len(request.NextPageToken) == 8 {
-		// TODO @wxing1292 remove this block in 1.10.x
-		//  this else if block exists to handle forward / backwards compatibility
-		lastNodeID, err := deserializePageToken(request.NextPageToken)
-		if err != nil {
-			return nil, err
+		if request.ReverseOrder {
+			token = newHistoryNodePaginationToken(request.MaxNodeID, MaxTxnID)
+		} else {
+			token = newHistoryNodePaginationToken(request.MinNodeID, MinTxnID)
 		}
-		token = newHistoryNodePaginationToken(lastNodeID+1, MinTxnID)
 	} else {
 		token, err = deserializeHistoryNodePaginationToken(request.NextPageToken)
 		if err != nil {
@@ -192,15 +204,27 @@ func (m *sqlExecutionStore) ReadHistoryBranch(
 		}
 	}
 
+	minNodeId, maxNodeId := request.MinNodeID, request.MaxNodeID
+	minTxnId, maxTxnId := MinTxnID, MaxTxnID
+	if request.ReverseOrder {
+		maxNodeId = token.LastNodeID
+		maxTxnId = token.LastTxnID
+	} else {
+		minNodeId = token.LastNodeID
+		minTxnId = token.LastTxnID
+	}
+
 	rows, err := m.Db.RangeSelectFromHistoryNode(ctx, sqlplugin.HistoryNodeSelectFilter{
 		ShardID:      request.ShardID,
 		TreeID:       treeIDBytes,
 		BranchID:     branchIDBytes,
-		MinNodeID:    token.LastNodeID,
-		MinTxnID:     token.LastTxnID,
-		MaxNodeID:    request.MaxNodeID,
+		MinNodeID:    minNodeId,
+		MinTxnID:     minTxnId,
+		MaxNodeID:    maxNodeId,
+		MaxTxnID:     maxTxnId,
 		PageSize:     request.PageSize,
 		MetadataOnly: request.MetadataOnly,
+		ReverseOrder: request.ReverseOrder,
 	})
 	switch err {
 	case nil:
@@ -245,50 +269,52 @@ func (m *sqlExecutionStore) ReadHistoryBranch(
 // A valid forking nodeID can be an ancestor from the existing branch.
 // For example, we have branch B1 with three nodes(1[1,2], 3[3,4,5] and 6[6,7,8]. 1, 3 and 6 are nodeIDs (first eventID of the batch).
 // So B1 looks like this:
-//           1[1,2]
-//           /
-//         3[3,4,5]
-//        /
-//      6[6,7,8]
+//
+//	     1[1,2]
+//	     /
+//	   3[3,4,5]
+//	  /
+//	6[6,7,8]
 //
 // Assuming we have branch B2 which contains one ancestor B1 stopping at 6 (exclusive). So B2 inherit nodeID 1 and 3 from B1, and have its own nodeID 6 and 8.
 // Branch B2 looks like this:
-//           1[1,2]
-//           /
-//         3[3,4,5]
-//          \
-//           6[6,7]
-//           \
-//            8[8]
 //
-//Now we want to fork a new branch B3 from B2.
+//	  1[1,2]
+//	  /
+//	3[3,4,5]
+//	 \
+//	  6[6,7]
+//	  \
+//	   8[8]
+//
+// Now we want to fork a new branch B3 from B2.
 // The only valid forking nodeIDs are 3,6 or 8.
 // 1 is not valid because we can't fork from first node.
 // 2/4/5 is NOT valid either because they are inside a batch.
 //
 // Case #1: If we fork from nodeID 6, then B3 will have an ancestor B1 which stops at 6(exclusive).
 // As we append a batch of events[6,7,8,9] to B3, it will look like :
-//           1[1,2]
-//           /
-//         3[3,4,5]
-//          \
-//         6[6,7,8,9]
+//
+//	  1[1,2]
+//	  /
+//	3[3,4,5]
+//	 \
+//	6[6,7,8,9]
 //
 // Case #2: If we fork from node 8, then B3 will have two ancestors: B1 stops at 6(exclusive) and ancestor B2 stops at 8(exclusive)
 // As we append a batch of events[8,9] to B3, it will look like:
-//           1[1,2]
-//           /
-//         3[3,4,5]
-//        /
-//      6[6,7]
-//       \
-//       8[8,9]
 //
+//	     1[1,2]
+//	     /
+//	   3[3,4,5]
+//	  /
+//	6[6,7]
+//	 \
+//	 8[8,9]
 func (m *sqlExecutionStore) ForkHistoryBranch(
+	ctx context.Context,
 	request *p.InternalForkHistoryBranchRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	forkB := request.ForkBranchInfo
 	treeInfoBlob := request.TreeInfo
 	newBranchIdBytes, err := primitives.ParseUUID(request.NewBranchID)
@@ -317,24 +343,22 @@ func (m *sqlExecutionStore) ForkHistoryBranch(
 	if err != nil {
 		return err
 	}
-	if rowsAffected != 1 {
-		return fmt.Errorf("expected 1 row to be affected for tree table, got %v", rowsAffected)
+	if !(rowsAffected == 1 || rowsAffected == 2) {
+		return fmt.Errorf("expected 1 or 2 row to be affected for tree table, got %v", rowsAffected)
 	}
 	return nil
 }
 
 // DeleteHistoryBranch removes a branch
 func (m *sqlExecutionStore) DeleteHistoryBranch(
+	ctx context.Context,
 	request *p.InternalDeleteHistoryBranchRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-
-	branchIDBytes, err := primitives.ParseUUID(request.BranchId)
+	branchIDBytes, err := primitives.ParseUUID(request.BranchInfo.BranchId)
 	if err != nil {
 		return err
 	}
-	treeIDBytes, err := primitives.ParseUUID(request.TreeId)
+	treeIDBytes, err := primitives.ParseUUID(request.BranchInfo.TreeId)
 	if err != nil {
 		return err
 	}
@@ -371,21 +395,79 @@ func (m *sqlExecutionStore) DeleteHistoryBranch(
 	})
 }
 
+// getAllHistoryTreeBranchesPaginationToken represents the primary key of the latest row in the history_tree table that
+// we returned.
+type getAllHistoryTreeBranchesPaginationToken struct {
+	ShardID  int32
+	TreeID   primitives.UUID
+	BranchID primitives.UUID
+}
+
 func (m *sqlExecutionStore) GetAllHistoryTreeBranches(
+	ctx context.Context,
 	request *p.GetAllHistoryTreeBranchesRequest,
 ) (*p.InternalGetAllHistoryTreeBranchesResponse, error) {
+	pageSize := request.PageSize
+	if pageSize <= 0 {
+		return nil, fmt.Errorf("PageSize must be greater than 0, but was %d", pageSize)
+	}
 
-	// TODO https://github.com/uber/cadence/issues/2458
-	// Implement it when we need
-	panic("not implemented yet")
+	page := sqlplugin.HistoryTreeBranchPage{
+		Limit: pageSize,
+	}
+	if len(request.NextPageToken) != 0 {
+		var token getAllHistoryTreeBranchesPaginationToken
+		if err := json.Unmarshal(request.NextPageToken, &token); err != nil {
+			return nil, err
+		}
+		page.ShardID = token.ShardID
+		page.TreeID = token.TreeID
+		page.BranchID = token.BranchID
+	}
+
+	rows, err := m.Db.PaginateBranchesFromHistoryTree(ctx, page)
+	if err != nil {
+		return nil, err
+	}
+	branches := make([]p.InternalHistoryBranchDetail, 0, pageSize)
+	for _, row := range rows {
+		branch := p.InternalHistoryBranchDetail{
+			TreeID:   row.TreeID.String(),
+			BranchID: row.BranchID.String(),
+			Data:     row.Data,
+			Encoding: row.DataEncoding,
+		}
+		branches = append(branches, branch)
+	}
+
+	response := &p.InternalGetAllHistoryTreeBranchesResponse{
+		Branches: branches,
+	}
+	if len(branches) < pageSize {
+		// no next page token because there are no more results
+		return response, nil
+	}
+
+	// if we filled the page with rows, then set the next page token
+	lastRow := rows[len(rows)-1]
+	token := getAllHistoryTreeBranchesPaginationToken{
+		ShardID:  lastRow.ShardID,
+		TreeID:   lastRow.TreeID,
+		BranchID: lastRow.BranchID,
+	}
+	tokenBytes, err := json.Marshal(token)
+	if err != nil {
+		return nil, err
+	}
+	response.NextPageToken = tokenBytes
+	return response, nil
 }
 
 // GetHistoryTree returns all branch information of a tree
 func (m *sqlExecutionStore) GetHistoryTree(
+	ctx context.Context,
 	request *p.GetHistoryTreeRequest,
 ) (*p.InternalGetHistoryTreeResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	treeID, err := primitives.ParseUUID(request.TreeID)
 	if err != nil {
 		return nil, err
@@ -393,7 +475,7 @@ func (m *sqlExecutionStore) GetHistoryTree(
 
 	rows, err := m.Db.SelectFromHistoryTree(ctx, sqlplugin.HistoryTreeSelectFilter{
 		TreeID:  treeID,
-		ShardID: *request.ShardID,
+		ShardID: request.ShardID,
 	})
 	if err == sql.ErrNoRows || (err == nil && len(rows) == 0) {
 		return &p.InternalGetHistoryTreeResponse{}, nil

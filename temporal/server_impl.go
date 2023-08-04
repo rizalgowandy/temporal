@@ -29,282 +29,171 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/uber-go/tally/v4"
-	sdkclient "go.temporal.io/sdk/client"
-	"go.uber.org/fx"
+	"go.uber.org/multierr"
 
-	"go.temporal.io/server/client"
-	"go.temporal.io/server/common"
-	"go.temporal.io/server/common/archiver"
-	"go.temporal.io/server/common/archiver/provider"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	persistenceClient "go.temporal.io/server/common/persistence/client"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/resolver"
 	"go.temporal.io/server/common/resource"
-	"go.temporal.io/server/common/ringpop"
-	"go.temporal.io/server/common/rpc"
-	"go.temporal.io/server/common/rpc/encryption"
+	"go.temporal.io/server/common/util"
 )
 
 type (
-	NamespaceLogger log.Logger
-	ServiceName     string
-	ServiceNames    map[string]struct{}
-
 	// ServerImpl is temporal server.
 	ServerImpl struct {
-		so                 *serverOptions
-		servicesMetadata   []*ServicesMetadata
-		stoppedCh          chan interface{}
-		logger             log.Logger
-		namespaceLogger    NamespaceLogger
-		serverReporter     metrics.Reporter
-		sdkReporter        metrics.Reporter
-		globalMetricsScope tally.Scope
+		so               *serverOptions
+		servicesMetadata []*ServicesMetadata
+		stoppedCh        chan interface{}
+		logger           log.Logger
+		namespaceLogger  resource.NamespaceLogger
 
-		dynamicConfigClient dynamicconfig.Client
-		dcCollection        *dynamicconfig.Collection
-
-		persistenceConfig config.Persistence
-		clusterMetadata   *cluster.Config
+		persistenceConfig          config.Persistence
+		clusterMetadata            *cluster.Config
+		persistenceFactoryProvider persistenceClient.FactoryProviderFn
+		metricsHandler             metrics.Handler
 	}
 )
 
-var ServerFxImplModule = fx.Options(
-	fx.Provide(NewServerFxImpl),
-	fx.Provide(func(src *ServerImpl) Server { return src }),
-)
-
-// NewServer returns a new instance of server that serves one or many services.
+// NewServerFxImpl returns a new instance of server that serves one or many services.
 func NewServerFxImpl(
 	opts *serverOptions,
 	logger log.Logger,
-	namespaceLogger NamespaceLogger,
+	namespaceLogger resource.NamespaceLogger,
 	stoppedCh chan interface{},
-	dynamicConfigClient dynamicconfig.Client,
-	dcCollection *dynamicconfig.Collection,
-	serverReporter ServerReporter,
-	sdkReporter SdkReporter,
-	globalMetricsScope tally.Scope,
 	servicesGroup ServicesGroupIn,
 	persistenceConfig config.Persistence,
 	clusterMetadata *cluster.Config,
+	persistenceFactoryProvider persistenceClient.FactoryProviderFn,
+	metricsHandler metrics.Handler,
 ) *ServerImpl {
 	s := &ServerImpl{
-		so:                  opts,
-		servicesMetadata:    servicesGroup.Services,
-		stoppedCh:           stoppedCh,
-		logger:              logger,
-		namespaceLogger:     namespaceLogger,
-		serverReporter:      serverReporter,
-		sdkReporter:         sdkReporter,
-		globalMetricsScope:  globalMetricsScope,
-		dynamicConfigClient: dynamicConfigClient,
-		dcCollection:        dcCollection,
-		persistenceConfig:   persistenceConfig,
-		clusterMetadata:     clusterMetadata,
+		so:                         opts,
+		stoppedCh:                  stoppedCh,
+		logger:                     logger,
+		namespaceLogger:            namespaceLogger,
+		persistenceConfig:          persistenceConfig,
+		clusterMetadata:            clusterMetadata,
+		persistenceFactoryProvider: persistenceFactoryProvider,
+		metricsHandler:             metricsHandler,
+	}
+	for _, svcMeta := range servicesGroup.Services {
+		if svcMeta != nil {
+			s.servicesMetadata = append(s.servicesMetadata, svcMeta)
+		}
 	}
 	return s
 }
 
-// Start temporal server.
-// This function should be called only once, Server doesn't support multiple restarts.
-func (s *ServerImpl) Start() error {
+func (s *ServerImpl) Start(ctx context.Context) error {
 	s.logger.Info("Starting server for services", tag.Value(s.so.serviceNames))
 	s.logger.Debug(s.so.config.String())
 
-	var err error
-
-	err = initSystemNamespaces(
+	if err := initSystemNamespaces(
+		ctx,
 		&s.persistenceConfig,
 		s.clusterMetadata.CurrentClusterName,
 		s.so.persistenceServiceResolver,
+		s.persistenceFactoryProvider,
 		s.logger,
-		s.so.customDataStoreFactory)
-	if err != nil {
+		s.so.customDataStoreFactory,
+		s.metricsHandler,
+	); err != nil {
 		return fmt.Errorf("unable to initialize system namespace: %w", err)
 	}
 
-	for _, svcMeta := range s.servicesMetadata {
-		timeoutCtx, cancelFunc := context.WithTimeout(context.Background(), serviceStartTimeout)
-		svcMeta.App.Start(timeoutCtx)
-		cancelFunc()
-	}
-
-	if s.so.blockingStart {
-		// If s.so.interruptCh is nil this will wait forever.
-		interruptSignal := <-s.so.interruptCh
-		s.logger.Info("Received interrupt signal, stopping the server.", tag.Value(interruptSignal))
-		s.Stop()
-	}
-
-	return nil
+	return s.startServices()
 }
 
-// Stop stops the server.
-func (s *ServerImpl) Stop() {
+func (s *ServerImpl) Stop(ctx context.Context) error {
 	var wg sync.WaitGroup
 	wg.Add(len(s.servicesMetadata))
 	close(s.stoppedCh)
 
 	for _, svcMeta := range s.servicesMetadata {
 		go func(svc *ServicesMetadata) {
-			svc.ServiceStopFn()
+			svc.Stop(ctx)
 			wg.Done()
 		}(svcMeta)
 	}
 
 	wg.Wait()
 
-	if s.sdkReporter != nil {
-		s.sdkReporter.Stop(s.logger)
+	if s.so.metricHandler != nil {
+		s.so.metricHandler.Stop(s.logger)
 	}
-
-	if s.serverReporter != nil {
-		s.serverReporter.Stop(s.logger)
-	}
+	return nil
 }
 
-// Populates parameters for a service
-func newBootstrapParams(
-	logger log.Logger,
-	namespaceLogger NamespaceLogger,
-	cfg *config.Config,
-	serviceName ServiceName,
-	dc *dynamicconfig.Collection,
-	serverReporter ServerReporter,
-	sdkReporter SdkReporter,
-	tlsConfigProvider encryption.TLSConfigProvider,
-	persistenceConfig config.Persistence,
-	clusterMetadata *cluster.Config,
-	clientFactoryProvider client.FactoryProvider,
-) (*resource.BootstrapParams, error) {
-	svcName := string(serviceName)
-	params := &resource.BootstrapParams{
-		Name:                  svcName,
-		NamespaceLogger:       namespaceLogger,
-		PersistenceConfig:     persistenceConfig,
-		ClusterMetadataConfig: clusterMetadata,
-		DCRedirectionPolicy:   cfg.DCRedirectionPolicy,
-		ClientFactoryProvider: clientFactoryProvider,
+func (s *ServerImpl) startServices() error {
+	// The membership join time may exceed the configured max join duration.
+	// Double the service start timeout to make sure there is enough time for start logic.
+	timeout := util.Max(serviceStartTimeout, 2*s.so.config.Global.Membership.MaxJoinDuration)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	results := make(chan startServiceResult, len(s.servicesMetadata))
+	for _, svcMeta := range s.servicesMetadata {
+		go func(svcMeta *ServicesMetadata) {
+			err := svcMeta.app.Start(ctx)
+			results <- startServiceResult{
+				svc: svcMeta,
+				err: err,
+			}
+		}(svcMeta)
 	}
-
-	svcCfg := cfg.Services[svcName]
-	rpcFactory := rpc.NewFactory(&svcCfg.RPC, svcName, logger, tlsConfigProvider, dc)
-	params.RPCFactory = rpcFactory
-
-	// Ringpop uses a different port to register handlers, this map is needed to resolve
-	// services to correct addresses used by clients through ServiceResolver lookup API
-	servicePortMap := make(map[string]int)
-	for sn, sc := range cfg.Services {
-		servicePortMap[sn] = sc.RPC.GRPCPort
-	}
-
-	params.MembershipFactoryInitializer =
-		func(persistenceBean persistenceClient.Bean, logger log.Logger) (resource.MembershipMonitorFactory, error) {
-			return ringpop.NewRingpopFactory(
-				&cfg.Global.Membership,
-				rpcFactory.GetRingpopChannel(),
-				svcName,
-				servicePortMap,
-				logger,
-				persistenceBean.GetClusterMetadataManager(),
-			)
-		}
-
-	// todo: Replace this hack with actually using sdkReporter, Client or Scope.
-	if serverReporter == nil {
-		var err error
-		serverReporter, sdkReporter, err = svcCfg.Metrics.InitMetricReporters(logger, nil)
-		if err != nil {
-			return nil, fmt.Errorf(
-				"unable to initialize per-service metric client. "+
-					"This is deprecated behavior used as fallback, please use global metric config. Error: %w", err)
-		}
-		params.ServerMetricsReporter = serverReporter
-		params.SDKMetricsReporter = sdkReporter
-	}
-
-	globalTallyScope, err := extractTallyScopeForSDK(sdkReporter)
-	if err != nil {
-		return nil, err
-	}
-	params.MetricsScope = globalTallyScope
-
-	serviceIdx := metrics.GetMetricsServiceIdx(svcName, logger)
-	metricsClient, err := serverReporter.NewClient(logger, serviceIdx)
-	if err != nil {
-		return nil, fmt.Errorf("unable to initialize metrics client: %w", err)
-	}
-
-	params.MetricsClient = metricsClient
-
-	options, err := tlsConfigProvider.GetFrontendClientConfig()
-	if err != nil {
-		return nil, fmt.Errorf("unable to load frontend TLS configuration: %w", err)
-	}
-
-	params.SdkClient, err = sdkclient.NewClient(sdkclient.Options{
-		HostPort:     cfg.PublicClient.HostPort,
-		Namespace:    common.SystemLocalNamespace,
-		MetricsScope: globalTallyScope,
-		Logger:       log.NewSdkLogger(logger),
-		ConnectionOptions: sdkclient.ConnectionOptions{
-			TLS:                options,
-			DisableHealthCheck: true,
-		},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("unable to create public client: %w", err)
-	}
-
-	params.ArchivalMetadata = archiver.NewArchivalMetadata(
-		dc,
-		cfg.Archival.History.State,
-		cfg.Archival.History.EnableRead,
-		cfg.Archival.Visibility.State,
-		cfg.Archival.Visibility.EnableRead,
-		&cfg.NamespaceDefaults.Archival,
-	)
-
-	params.ArchiverProvider = provider.NewArchiverProvider(cfg.Archival.History.Provider, cfg.Archival.Visibility.Provider)
-	params.PersistenceConfig.TransactionSizeLimit = dc.GetIntProperty(dynamicconfig.TransactionSizeLimit, common.DefaultTransactionSizeLimit)
-
-	return params, nil
+	return s.readResults(results)
 }
 
-func extractTallyScopeForSDK(sdkReporter metrics.Reporter) (tally.Scope, error) {
-	if sdkTallyReporter, ok := sdkReporter.(*metrics.TallyReporter); ok {
-		return sdkTallyReporter.GetScope(), nil
-	} else {
-		return nil, fmt.Errorf(
-			"Sdk reporter is not of Tally type. Unfortunately, SDK only supports Tally for now. "+
-				"Please specify prometheusSDK in metrics config with framework type %s.", metrics.FrameworkTally,
-		)
+func (s *ServerImpl) readResults(results chan startServiceResult) (err error) {
+	for range s.servicesMetadata {
+		r := <-results
+		if r.err != nil {
+			err = multierr.Combine(err, fmt.Errorf("failed to start service %v: %w", r.svc.serviceName, r.err))
+		}
 	}
+	return
+}
+
+type startServiceResult struct {
+	svc *ServicesMetadata
+	err error
 }
 
 func initSystemNamespaces(
+	ctx context.Context,
 	cfg *config.Persistence,
 	currentClusterName string,
 	persistenceServiceResolver resolver.ServiceResolver,
+	persistenceFactoryProvider persistenceClient.FactoryProviderFn,
 	logger log.Logger,
 	customDataStoreFactory persistenceClient.AbstractDataStoreFactory,
+	metricsHandler metrics.Handler,
 ) error {
-	factory := persistenceClient.NewFactory(
-		cfg,
+	clusterName := persistenceClient.ClusterName(currentClusterName)
+	metricsHandler = metricsHandler.WithTags(metrics.ServiceNameTag(primitives.ServerService))
+	dataStoreFactory, _ := persistenceClient.DataStoreFactoryProvider(
+		clusterName,
 		persistenceServiceResolver,
-		nil,
+		cfg,
 		customDataStoreFactory,
-		currentClusterName,
-		nil,
 		logger,
+		metricsHandler,
 	)
+	factory := persistenceFactoryProvider(persistenceClient.NewFactoryParams{
+		DataStoreFactory:           dataStoreFactory,
+		Cfg:                        cfg,
+		PersistenceMaxQPS:          nil,
+		PersistenceNamespaceMaxQPS: nil,
+		EnablePriorityRateLimiting: nil,
+		ClusterName:                persistenceClient.ClusterName(currentClusterName),
+		MetricsHandler:             metricsHandler,
+		Logger:                     logger,
+	})
 	defer factory.Close()
 
 	metadataManager, err := factory.NewMetadataManager()
@@ -312,7 +201,8 @@ func initSystemNamespaces(
 		return fmt.Errorf("unable to initialize metadata manager: %w", err)
 	}
 	defer metadataManager.Close()
-	if err = metadataManager.InitializeSystemNamespaces(currentClusterName); err != nil {
+	ctx = headers.SetCallerInfo(ctx, headers.SystemBackgroundCallerInfo)
+	if err = metadataManager.InitializeSystemNamespaces(ctx, currentClusterName); err != nil {
 		return fmt.Errorf("unable to register system namespace: %w", err)
 	}
 	return nil

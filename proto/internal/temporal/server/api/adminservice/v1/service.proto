@@ -27,20 +27,9 @@ import "temporal/server/api/adminservice/v1/request_response.proto";
 
 // AdminService provides advanced APIs for debugging and analysis with admin privilege
 service AdminService {
-    // ListNamespaces returns the information and configuration for all namespaces.
-    rpc ListNamespaces (ListNamespacesRequest) returns (ListNamespacesResponse) {
-    }
-
-    // RegisterNamespace creates a new namespace.
-    rpc RegisterNamespace (RegisterNamespaceRequest) returns (RegisterNamespaceResponse) {
-    }
-
-    // (-- api-linter: core::0134::method-signature=disabled
-    //     aip.dev/not-precedent: UpdateNamespace RPC doesn't follow Google API format. --)
-    // (-- api-linter: core::0134::response-message-name=disabled
-    //     aip.dev/not-precedent: UpdateNamespace RPC doesn't follow Google API format. --)
-    // UpdateNamespace is used to update the information and configuration for a registered namespace.
-    rpc UpdateNamespace (UpdateNamespaceRequest) returns (UpdateNamespaceResponse) {
+    // RebuildMutableState attempts to rebuild mutable state according to persisted history events.
+    // NOTE: this is experimental API
+    rpc RebuildMutableState (RebuildMutableStateRequest) returns (RebuildMutableStateResponse) {
     }
 
     // DescribeWorkflowExecution returns information about the internal states of workflow execution.
@@ -57,16 +46,7 @@ service AdminService {
     rpc CloseShard (CloseShardRequest) returns (CloseShardResponse) {
     }
 
-    rpc ListTransferTasks (ListTransferTasksRequest) returns (ListTransferTasksResponse) {
-    }
-
-    rpc ListTimerTasks (ListTimerTasksRequest) returns (ListTimerTasksResponse) {
-    }
-
-    rpc ListReplicationTasks (ListReplicationTasksRequest) returns (ListReplicationTasksResponse) {
-    }
-
-    rpc ListVisibilityTasks (ListVisibilityTasksRequest) returns (ListVisibilityTasksResponse) {
+    rpc ListHistoryTasks (ListHistoryTasksRequest) returns (ListHistoryTasksResponse) {
     }
 
     rpc RemoveTask (RemoveTaskRequest) returns (RemoveTaskResponse) {
@@ -96,19 +76,26 @@ service AdminService {
     }
 
     // AddSearchAttributes add custom search attributes and returns comprehensive information about them.
+    // Deprecated. Use operatorservice instead.
     rpc AddSearchAttributes (AddSearchAttributesRequest) returns (AddSearchAttributesResponse) {
     }
 
     // RemoveSearchAttributes removes custom search attributes and returns comprehensive information about them.
+    // Deprecated. Use operatorservice instead.
     rpc RemoveSearchAttributes (RemoveSearchAttributesRequest) returns (RemoveSearchAttributesResponse) {
     }
 
     // GetSearchAttributes returns comprehensive information about search attributes.
+    // Deprecated. Use operatorservice instead.
     rpc GetSearchAttributes (GetSearchAttributesRequest) returns (GetSearchAttributesResponse) {
     }
 
     // DescribeCluster returns information about Temporal cluster.
     rpc DescribeCluster(DescribeClusterRequest) returns (DescribeClusterResponse) {
+    }
+
+    // ListClusters returns information about Temporal clusters.
+    rpc ListClusters(ListClustersRequest) returns (ListClustersResponse) {
     }
 
     // ListClusterMembers returns information about Temporal cluster members.
@@ -147,6 +134,13 @@ service AdminService {
 
     // GetTaskQueueTasks returns tasks from task queue.
     rpc GetTaskQueueTasks(GetTaskQueueTasksRequest) returns (GetTaskQueueTasksResponse) {
+    }
+
+    // DeleteWorkflowExecution force deletes a workflow's visibility record, current & concrete execution record and history if possible
+    rpc DeleteWorkflowExecution(DeleteWorkflowExecutionRequest) returns (DeleteWorkflowExecutionResponse) {
+    }
+
+    rpc StreamWorkflowReplicationMessages(stream StreamWorkflowReplicationMessagesRequest) returns (stream StreamWorkflowReplicationMessagesResponse) {
     }
 }
 

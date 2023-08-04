@@ -25,6 +25,7 @@
 package cassandra
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -37,6 +38,129 @@ import (
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
 	"go.temporal.io/server/common/primitives/timestamp"
+)
+
+const (
+	templateCreateTaskQuery = `INSERT INTO tasks (` +
+		`namespace_id, task_queue_name, task_queue_type, type, task_id, task, task_encoding) ` +
+		`VALUES(?, ?, ?, ?, ?, ?, ?)`
+
+	templateCreateTaskWithTTLQuery = `INSERT INTO tasks (` +
+		`namespace_id, task_queue_name, task_queue_type, type, task_id, task, task_encoding) ` +
+		`VALUES(?, ?, ?, ?, ?, ?, ?) USING TTL ?`
+
+	templateGetTasksQuery = `SELECT task_id, task, task_encoding ` +
+		`FROM tasks ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and task_id >= ? ` +
+		`and task_id < ?`
+
+	templateCompleteTaskQuery = `DELETE FROM tasks ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and task_id = ?`
+
+	templateCompleteTasksLessThanQuery = `DELETE FROM tasks ` +
+		`WHERE namespace_id = ? ` +
+		`AND task_queue_name = ? ` +
+		`AND task_queue_type = ? ` +
+		`AND type = ? ` +
+		`AND task_id < ? `
+
+	templateGetTaskQueueQuery = `SELECT ` +
+		`range_id, ` +
+		`task_queue, ` +
+		`task_queue_encoding ` +
+		`FROM tasks ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and task_id = ?`
+
+	templateInsertTaskQueueQuery = `INSERT INTO tasks (` +
+		`namespace_id, ` +
+		`task_queue_name, ` +
+		`task_queue_type, ` +
+		`type, ` +
+		`task_id, ` +
+		`range_id, ` +
+		`task_queue, ` +
+		`task_queue_encoding ` +
+		`) VALUES (?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS`
+
+	templateUpdateTaskQueueQuery = `UPDATE tasks SET ` +
+		`range_id = ?, ` +
+		`task_queue = ?, ` +
+		`task_queue_encoding = ? ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and task_id = ? ` +
+		`IF range_id = ?`
+
+	templateUpdateTaskQueueQueryWithTTLPart1 = `INSERT INTO tasks (` +
+		`namespace_id, ` +
+		`task_queue_name, ` +
+		`task_queue_type, ` +
+		`type, ` +
+		`task_id ` +
+		`) VALUES (?, ?, ?, ?, ?) USING TTL ?`
+
+	templateUpdateTaskQueueQueryWithTTLPart2 = `UPDATE tasks USING TTL ? SET ` +
+		`range_id = ?, ` +
+		`task_queue = ?, ` +
+		`task_queue_encoding = ? ` +
+		`WHERE namespace_id = ? ` +
+		`and task_queue_name = ? ` +
+		`and task_queue_type = ? ` +
+		`and type = ? ` +
+		`and task_id = ? ` +
+		`IF range_id = ?`
+
+	templateDeleteTaskQueueQuery = `DELETE FROM tasks ` +
+		`WHERE namespace_id = ? ` +
+		`AND task_queue_name = ? ` +
+		`AND task_queue_type = ? ` +
+		`AND type = ? ` +
+		`AND task_id = ? ` +
+		`IF range_id = ?`
+
+	templateGetTaskQueueUserDataQuery = `SELECT data, data_encoding, version
+	    FROM task_queue_user_data
+		WHERE namespace_id = ? AND build_id = ''
+		AND task_queue_name = ?`
+
+	templateUpdateTaskQueueUserDataQuery = `UPDATE task_queue_user_data SET
+		data = ?,
+		data_encoding = ?,
+		version = ?
+		WHERE namespace_id = ?
+		AND build_id = ''
+		AND task_queue_name = ?
+		IF version = ?`
+
+	templateInsertTaskQueueUserDataQuery = `INSERT INTO task_queue_user_data
+		(namespace_id, build_id, task_queue_name, data, data_encoding, version) VALUES
+		(?           , ''      , ?              , ?   , ?            , 1      ) IF NOT EXISTS`
+
+	templateInsertBuildIdTaskQueueMappingQuery = `INSERT INTO task_queue_user_data
+	(namespace_id, build_id, task_queue_name) VALUES
+	(?           , ?       , ?)`
+	templateDeleteBuildIdTaskQueueMappingQuery = `DELETE FROM task_queue_user_data
+	WHERE namespace_id = ? AND build_id = ? AND task_queue_name = ?`
+	templateListTaskQueueUserDataQuery       = `SELECT task_queue_name, data, data_encoding, version FROM task_queue_user_data WHERE namespace_id = ? AND build_id = ''`
+	templateListTaskQueueNamesByBuildIdQuery = `SELECT task_queue_name FROM task_queue_user_data WHERE namespace_id = ? AND build_id = ?`
+	templateCountTaskQueueByBuildIdQuery     = `SELECT COUNT(*) FROM task_queue_user_data WHERE namespace_id = ? AND build_id = ?`
+
+	// Not much of a need to make this configurable, we're just reading some strings
+	listTaskQueueNamesByBuildIdPageSize = 100
 )
 
 type (
@@ -57,6 +181,7 @@ func NewMatchingTaskStore(
 }
 
 func (d *MatchingTaskStore) CreateTaskQueue(
+	ctx context.Context,
 	request *p.InternalCreateTaskQueueRequest,
 ) error {
 	query := d.Session.Query(templateInsertTaskQueueQuery,
@@ -68,12 +193,12 @@ func (d *MatchingTaskStore) CreateTaskQueue(
 		request.RangeID,
 		request.TaskQueueInfo.Data,
 		request.TaskQueueInfo.EncodingType.String(),
-	)
+	).WithContext(ctx)
 
 	previous := make(map[string]interface{})
 	applied, err := query.MapScanCAS(previous)
 	if err != nil {
-		return gocql.ConvertError("LeaseTaskQueue", err)
+		return gocql.ConvertError("CreateTaskQueue", err)
 	}
 
 	if !applied {
@@ -88,15 +213,16 @@ func (d *MatchingTaskStore) CreateTaskQueue(
 }
 
 func (d *MatchingTaskStore) GetTaskQueue(
+	ctx context.Context,
 	request *p.InternalGetTaskQueueRequest,
 ) (*p.InternalGetTaskQueueResponse, error) {
-	query := d.Session.Query(templateGetTaskQueue,
+	query := d.Session.Query(templateGetTaskQueueQuery,
 		request.NamespaceID,
 		request.TaskQueue,
 		request.TaskType,
 		rowTypeTaskQueue,
 		taskQueueTaskID,
-	)
+	).WithContext(ctx)
 
 	var rangeID int64
 	var tlBytes []byte
@@ -111,39 +237,9 @@ func (d *MatchingTaskStore) GetTaskQueue(
 	}, nil
 }
 
-func (d *MatchingTaskStore) ExtendLease(
-	request *p.InternalExtendLeaseRequest,
-) error {
-	query := d.Session.Query(templateUpdateTaskQueueQuery,
-		request.RangeID+1,
-		request.TaskQueueInfo.Data,
-		request.TaskQueueInfo.EncodingType.String(),
-		request.NamespaceID,
-		&request.TaskQueue,
-		request.TaskType,
-		rowTypeTaskQueue,
-		taskQueueTaskID,
-		request.RangeID,
-	)
-	previous := make(map[string]interface{})
-	applied, err := query.MapScanCAS(previous)
-	if err != nil {
-		return gocql.ConvertError("LeaseTaskQueue", err)
-	}
-
-	if !applied {
-		previousRangeID := previous["range_id"]
-		return &p.ConditionFailedError{
-			Msg: fmt.Sprintf("ExtendLease: taskQueue:%v, taskQueueType:%v, haveRangeID:%v, gotRangeID:%v",
-				request.TaskQueue, request.TaskType, request.RangeID, previousRangeID),
-		}
-	}
-
-	return nil
-}
-
 // UpdateTaskQueue update task queue
 func (d *MatchingTaskStore) UpdateTaskQueue(
+	ctx context.Context,
 	request *p.InternalUpdateTaskQueueRequest,
 ) (*p.UpdateTaskQueueResponse, error) {
 	var err error
@@ -153,18 +249,21 @@ func (d *MatchingTaskStore) UpdateTaskQueue(
 		if request.ExpiryTime == nil {
 			return nil, serviceerror.NewInternal("ExpiryTime cannot be nil for sticky task queue")
 		}
-		expiryTtl := convert.Int64Ceil(time.Until(timestamp.TimeValue(request.ExpiryTime)).Seconds())
-		batch := d.Session.NewBatch(gocql.LoggedBatch)
+		expiryTTL := convert.Int64Ceil(time.Until(timestamp.TimeValue(request.ExpiryTime)).Seconds())
+		if expiryTTL >= maxCassandraTTL {
+			expiryTTL = maxCassandraTTL
+		}
+		batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 		batch.Query(templateUpdateTaskQueueQueryWithTTLPart1,
 			request.NamespaceID,
 			request.TaskQueue,
 			request.TaskType,
 			rowTypeTaskQueue,
 			taskQueueTaskID,
-			expiryTtl,
+			expiryTTL,
 		)
 		batch.Query(templateUpdateTaskQueueQueryWithTTLPart2,
-			expiryTtl,
+			expiryTTL,
 			request.RangeID,
 			request.TaskQueueInfo.Data,
 			request.TaskQueueInfo.EncodingType.String(),
@@ -173,7 +272,7 @@ func (d *MatchingTaskStore) UpdateTaskQueue(
 			request.TaskType,
 			rowTypeTaskQueue,
 			taskQueueTaskID,
-			request.RangeID,
+			request.PrevRangeID,
 		)
 		applied, _, err = d.Session.MapExecuteBatchCAS(batch, previous)
 	} else {
@@ -186,8 +285,8 @@ func (d *MatchingTaskStore) UpdateTaskQueue(
 			request.TaskType,
 			rowTypeTaskQueue,
 			taskQueueTaskID,
-			request.RangeID,
-		)
+			request.PrevRangeID,
+		).WithContext(ctx)
 		applied, err = query.MapScanCAS(previous)
 	}
 
@@ -211,16 +310,25 @@ func (d *MatchingTaskStore) UpdateTaskQueue(
 }
 
 func (d *MatchingTaskStore) ListTaskQueue(
+	_ context.Context,
 	_ *p.ListTaskQueueRequest,
 ) (*p.InternalListTaskQueueResponse, error) {
-	return nil, serviceerror.NewUnavailable(fmt.Sprintf("unsupported operation"))
+	return nil, serviceerror.NewUnavailable("unsupported operation")
 }
 
 func (d *MatchingTaskStore) DeleteTaskQueue(
+	ctx context.Context,
 	request *p.DeleteTaskQueueRequest,
 ) error {
-	query := d.Session.Query(templateDeleteTaskQueueQuery,
-		request.TaskQueue.NamespaceID, request.TaskQueue.Name, request.TaskQueue.TaskType, rowTypeTaskQueue, taskQueueTaskID, request.RangeID)
+	query := d.Session.Query(
+		templateDeleteTaskQueueQuery,
+		request.TaskQueue.NamespaceID,
+		request.TaskQueue.TaskQueueName,
+		request.TaskQueue.TaskQueueType,
+		rowTypeTaskQueue,
+		taskQueueTaskID,
+		request.RangeID,
+	).WithContext(ctx)
 	previous := make(map[string]interface{})
 	applied, err := query.MapScanCAS(previous)
 	if err != nil {
@@ -236,9 +344,10 @@ func (d *MatchingTaskStore) DeleteTaskQueue(
 
 // CreateTasks add tasks
 func (d *MatchingTaskStore) CreateTasks(
+	ctx context.Context,
 	request *p.InternalCreateTasksRequest,
 ) (*p.CreateTasksResponse, error) {
-	batch := d.Session.NewBatch(gocql.LoggedBatch)
+	batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 	namespaceID := request.NamespaceID
 	taskQueue := request.TaskQueue
 	taskQueueType := request.TaskType
@@ -315,29 +424,22 @@ func GetTaskTTL(expireTime *time.Time) int64 {
 
 // GetTasks get a task
 func (d *MatchingTaskStore) GetTasks(
+	ctx context.Context,
 	request *p.GetTasksRequest,
 ) (*p.InternalGetTasksResponse, error) {
-	if request.MaxReadLevel == nil {
-		return nil, serviceerror.NewInternal("getTasks: both readLevel and maxReadLevel MUST be specified for cassandra persistence")
-	}
-	if request.ReadLevel > *request.MaxReadLevel {
-		return &p.InternalGetTasksResponse{}, nil
-	}
-
 	// Reading taskqueue tasks need to be quorum level consistent, otherwise we could lose tasks
 	query := d.Session.Query(templateGetTasksQuery,
 		request.NamespaceID,
 		request.TaskQueue,
 		request.TaskType,
 		rowTypeTask,
-		request.ReadLevel,
-		*request.MaxReadLevel,
-	)
-	iter := query.PageSize(request.BatchSize).Iter()
+		request.InclusiveMinTaskID,
+		request.ExclusiveMaxTaskID,
+	).WithContext(ctx)
+	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
 
 	response := &p.InternalGetTasksResponse{}
 	task := make(map[string]interface{})
-PopulateTasks:
 	for iter.MapScan(task) {
 		_, ok := task["task_id"]
 		if !ok { // no tasks, but static column record returned
@@ -364,32 +466,33 @@ PopulateTasks:
 			var byteSliceType []byte
 			return nil, newPersistedTypeMismatchError("task_encoding", byteSliceType, rawEncoding, task)
 		}
-
 		response.Tasks = append(response.Tasks, p.NewDataBlob(taskVal, encodingVal))
-		if len(response.Tasks) == request.BatchSize {
-			break PopulateTasks
-		}
+
 		task = make(map[string]interface{}) // Reinitialize map as initialized fails on unmarshalling
+	}
+	if len(iter.PageState()) > 0 {
+		response.NextPageToken = iter.PageState()
 	}
 
 	if err := iter.Close(); err != nil {
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTasks operation failed. Error: %v", err))
 	}
-
 	return response, nil
 }
 
 // CompleteTask delete a task
 func (d *MatchingTaskStore) CompleteTask(
+	ctx context.Context,
 	request *p.CompleteTaskRequest,
 ) error {
 	tli := request.TaskQueue
 	query := d.Session.Query(templateCompleteTaskQuery,
 		tli.NamespaceID,
-		tli.Name,
-		tli.TaskType,
+		tli.TaskQueueName,
+		tli.TaskQueueType,
 		rowTypeTask,
-		request.TaskID)
+		request.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	if err != nil {
@@ -399,19 +502,203 @@ func (d *MatchingTaskStore) CompleteTask(
 	return nil
 }
 
-// CompleteTasksLessThan deletes all tasks less than or equal to the given task id. This API ignores the
+// CompleteTasksLessThan deletes all tasks less than the given task id. This API ignores the
 // Limit request parameter i.e. either all tasks leq the task_id will be deleted or an error will
 // be returned to the caller
 func (d *MatchingTaskStore) CompleteTasksLessThan(
+	ctx context.Context,
 	request *p.CompleteTasksLessThanRequest,
 ) (int, error) {
-	query := d.Session.Query(templateCompleteTasksLessThanQuery,
-		request.NamespaceID, request.TaskQueueName, request.TaskType, rowTypeTask, request.TaskID)
+	query := d.Session.Query(
+		templateCompleteTasksLessThanQuery,
+		request.NamespaceID,
+		request.TaskQueueName,
+		request.TaskType,
+		rowTypeTask,
+		request.ExclusiveMaxTaskID,
+	).WithContext(ctx)
 	err := query.Exec()
 	if err != nil {
 		return 0, gocql.ConvertError("CompleteTasksLessThan", err)
 	}
 	return p.UnknownNumRowsAffected, nil
+}
+
+func (d *MatchingTaskStore) GetTaskQueueUserData(
+	ctx context.Context,
+	request *p.GetTaskQueueUserDataRequest,
+) (*p.InternalGetTaskQueueUserDataResponse, error) {
+	query := d.Session.Query(templateGetTaskQueueUserDataQuery,
+		request.NamespaceID,
+		request.TaskQueue,
+	).WithContext(ctx)
+	var version int64
+	var userDataBytes []byte
+	var encoding string
+	if err := query.Scan(&userDataBytes, &encoding, &version); err != nil {
+		return nil, gocql.ConvertError("GetTaskQueueData", err)
+	}
+
+	return &p.InternalGetTaskQueueUserDataResponse{
+		Version:  version,
+		UserData: p.NewDataBlob(userDataBytes, encoding),
+	}, nil
+}
+
+func (d *MatchingTaskStore) UpdateTaskQueueUserData(
+	ctx context.Context,
+	request *p.InternalUpdateTaskQueueUserDataRequest,
+) error {
+	batch := d.Session.NewBatch(gocql.UnloggedBatch).WithContext(ctx)
+
+	if request.Version == 0 {
+		batch.Query(templateInsertTaskQueueUserDataQuery,
+			request.NamespaceID,
+			request.TaskQueue,
+			request.UserData.Data,
+			request.UserData.EncodingType.String(),
+		)
+	} else {
+		batch.Query(templateUpdateTaskQueueUserDataQuery,
+			request.UserData.Data,
+			request.UserData.EncodingType.String(),
+			request.Version+1,
+			request.NamespaceID,
+			request.TaskQueue,
+			request.Version,
+		)
+	}
+	for _, buildId := range request.BuildIdsAdded {
+		batch.Query(templateInsertBuildIdTaskQueueMappingQuery, request.NamespaceID, buildId, request.TaskQueue)
+	}
+	for _, buildId := range request.BuildIdsRemoved {
+		batch.Query(templateDeleteBuildIdTaskQueueMappingQuery, request.NamespaceID, buildId, request.TaskQueue)
+	}
+
+	previous := make(map[string]interface{})
+	applied, iter, err := d.Session.MapExecuteBatchCAS(batch, previous)
+
+	if err != nil {
+		return gocql.ConvertError("UpdateTaskQueueUserData", err)
+	}
+
+	// We only care about the conflict in the first query
+	err = iter.Close()
+	if err != nil {
+		return gocql.ConvertError("UpdateTaskQueueUserData", err)
+	}
+
+	if !applied {
+		var columns []string
+		for k, v := range previous {
+			columns = append(columns, fmt.Sprintf("%s=%v", k, v))
+		}
+
+		return &p.ConditionFailedError{
+			Msg: fmt.Sprintf("Failed to update task queue. name: %v, version: %v, columns: (%v)",
+				request.TaskQueue, request.Version, strings.Join(columns, ",")),
+		}
+	}
+
+	return nil
+}
+
+func (d *MatchingTaskStore) ListTaskQueueUserDataEntries(ctx context.Context, request *p.ListTaskQueueUserDataEntriesRequest) (*p.InternalListTaskQueueUserDataEntriesResponse, error) {
+	query := d.Session.Query(templateListTaskQueueUserDataQuery, request.NamespaceID).WithContext(ctx)
+	iter := query.PageSize(request.PageSize).PageState(request.NextPageToken).Iter()
+
+	response := &p.InternalListTaskQueueUserDataEntriesResponse{}
+	row := make(map[string]interface{})
+	for iter.MapScan(row) {
+		taskQueueRaw, ok := row["task_queue_name"]
+		if !ok {
+			return nil, newFieldNotFoundError("task_queue_name", row)
+		}
+		taskQueue, ok := taskQueueRaw.(string)
+		if !ok {
+			return nil, newPersistedTypeMismatchError("task_queue_name", taskQueue, taskQueueRaw, row)
+		}
+
+		dataRaw, ok := row["data"]
+		if !ok {
+			return nil, newFieldNotFoundError("data", row)
+		}
+		data, ok := dataRaw.([]byte)
+		if !ok {
+			return nil, newPersistedTypeMismatchError("data", data, dataRaw, row)
+		}
+
+		dataEncodingRaw, ok := row["data_encoding"]
+		if !ok {
+			return nil, newFieldNotFoundError("data_encoding", row)
+		}
+		dataEncoding, ok := dataEncodingRaw.(string)
+		if !ok {
+			return nil, newPersistedTypeMismatchError("data_encoding", dataEncoding, dataEncodingRaw, row)
+		}
+
+		versionRaw, ok := row["version"]
+		if !ok {
+			return nil, newFieldNotFoundError("version", row)
+		}
+		version, ok := versionRaw.(int64)
+		if !ok {
+			return nil, newPersistedTypeMismatchError("version", version, versionRaw, row)
+		}
+
+		response.Entries = append(response.Entries, p.InternalTaskQueueUserDataEntry{TaskQueue: taskQueue, Data: p.NewDataBlob(data, dataEncoding), Version: version})
+
+		row = make(map[string]interface{}) // Reinitialize map as initialized fails on unmarshalling
+	}
+	if len(iter.PageState()) > 0 {
+		response.NextPageToken = iter.PageState()
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, serviceerror.NewUnavailable(fmt.Sprintf("ListTaskQueueUserDataEntries operation failed. Error: %v", err))
+	}
+	return response, nil
+}
+
+func (d *MatchingTaskStore) GetTaskQueuesByBuildId(ctx context.Context, request *p.GetTaskQueuesByBuildIdRequest) ([]string, error) {
+	query := d.Session.Query(templateListTaskQueueNamesByBuildIdQuery, request.NamespaceID, request.BuildID).WithContext(ctx)
+	iter := query.PageSize(listTaskQueueNamesByBuildIdPageSize).Iter()
+
+	var taskQueues []string
+	row := make(map[string]interface{})
+
+	for {
+		for iter.MapScan(row) {
+			taskQueueRaw, ok := row["task_queue_name"]
+			if !ok {
+				return nil, newFieldNotFoundError("task_queue_name", row)
+			}
+			taskQueue, ok := taskQueueRaw.(string)
+			if !ok {
+				var stringType string
+				return nil, newPersistedTypeMismatchError("task_queue_name", stringType, taskQueueRaw, row)
+			}
+
+			taskQueues = append(taskQueues, taskQueue)
+
+			row = make(map[string]interface{}) // Reinitialize map as initialized fails on unmarshalling
+		}
+		if len(iter.PageState()) == 0 {
+			break
+		}
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTaskQueuesByBuildId operation failed. Error: %v", err))
+	}
+	return taskQueues, nil
+}
+
+func (d *MatchingTaskStore) CountTaskQueuesByBuildId(ctx context.Context, request *p.CountTaskQueuesByBuildIdRequest) (int, error) {
+	var count int
+	query := d.Session.Query(templateCountTaskQueueByBuildIdQuery, request.NamespaceID, request.BuildID).WithContext(ctx)
+	err := query.Scan(&count)
+	return count, err
 }
 
 func (d *MatchingTaskStore) GetName() string {

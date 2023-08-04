@@ -31,13 +31,16 @@ import (
 
 	"github.com/gogo/status"
 	"go.temporal.io/api/serviceerror"
-	"go.temporal.io/server/common/headers"
-	"go.temporal.io/server/common/log"
-	"go.temporal.io/server/common/metrics"
-	serviceerrors "go.temporal.io/server/common/serviceerror"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
+
+	"go.temporal.io/server/common/headers"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/rpc/interceptor"
+	serviceerrors "go.temporal.io/server/common/serviceerror"
 )
 
 const (
@@ -60,10 +63,11 @@ const (
 // The hostName syntax is defined in
 // https://github.com/grpc/grpc/blob/master/doc/naming.md.
 // e.g. to use dns resolver, a "dns:///" prefix should be applied to the target.
-func Dial(hostName string, tlsConfig *tls.Config, logger log.Logger) (*grpc.ClientConn, error) {
-	// Default to insecure
-	grpcSecureOpt := grpc.WithInsecure()
-	if tlsConfig != nil {
+func Dial(hostName string, tlsConfig *tls.Config, logger log.Logger, interceptors ...grpc.UnaryClientInterceptor) (*grpc.ClientConn, error) {
+	var grpcSecureOpt grpc.DialOption
+	if tlsConfig == nil {
+		grpcSecureOpt = grpc.WithTransportCredentials(insecure.NewCredentials())
+	} else {
 		grpcSecureOpt = grpc.WithTransportCredentials(credentials.NewTLS(tlsConfig))
 	}
 
@@ -82,9 +86,15 @@ func Dial(hostName string, tlsConfig *tls.Config, logger log.Logger) (*grpc.Clie
 		grpcSecureOpt,
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxInternodeRecvPayloadSize)),
 		grpc.WithChainUnaryInterceptor(
-			versionHeadersInterceptor,
-			metrics.NewClientMetricsTrailerPropagatorInterceptor(logger),
-			errorInterceptor,
+			append(
+				interceptors,
+				headersInterceptor,
+				metrics.NewClientMetricsTrailerPropagatorInterceptor(logger),
+				errorInterceptor,
+			)...,
+		),
+		grpc.WithChainStreamInterceptor(
+			interceptor.StreamErrorInterceptor,
 		),
 		grpc.WithDefaultServiceConfig(DefaultServiceConfig),
 		grpc.WithDisableServiceConfig(),
@@ -110,7 +120,7 @@ func errorInterceptor(
 	return err
 }
 
-func versionHeadersInterceptor(
+func headersInterceptor(
 	ctx context.Context,
 	method string,
 	req, reply interface{},

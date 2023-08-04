@@ -49,19 +49,17 @@ type (
 
 	// ReplicationDLQTasksRangeFilter
 	ReplicationDLQTasksRangeFilter struct {
-		ShardID           int32
-		SourceClusterName string
-		MinTaskID         int64
-		MaxTaskID         int64
-		PageSize          int
+		ShardID            int32
+		SourceClusterName  string
+		InclusiveMinTaskID int64
+		ExclusiveMaxTaskID int64
+		PageSize           int
 	}
 
 	// HistoryReplicationDLQTask is the SQL persistence interface for history replication tasks DLQ
 	HistoryReplicationDLQTask interface {
 		// InsertIntoReplicationDLQTasks puts the replication task into DLQ
 		InsertIntoReplicationDLQTasks(ctx context.Context, row []ReplicationDLQTasksRow) (sql.Result, error)
-		// SelectFromReplicationDLQTasks returns one or more rows from replication_tasks_dlq table
-		SelectFromReplicationDLQTasks(ctx context.Context, filter ReplicationDLQTasksFilter) ([]ReplicationDLQTasksRow, error)
 		// RangeSelectFromReplicationDLQTasks returns one or more rows from replication_tasks_dlq table
 		RangeSelectFromReplicationDLQTasks(ctx context.Context, filter ReplicationDLQTasksRangeFilter) ([]ReplicationDLQTasksRow, error)
 		// DeleteFromReplicationDLQTasks deletes one row from replication_tasks_dlq table

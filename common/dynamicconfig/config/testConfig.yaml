@@ -24,6 +24,9 @@ testGetDurationPropertyKey:
 - value: 2
   constraints:
     namespace: samples-namespace
+- value: true
+  constraints:
+    namespace: broken-namespace
 testGetFloat64PropertyKey:
 - value: 12
   constraints: {}
@@ -50,6 +53,12 @@ testGetIntPropertyKey:
   constraints:
     namespace: global-samples-namespace
     taskQueueName: test-tq
+- value: 1004
+  constraints:
+    namespace: another-namespace
+- value: 1005
+  constraints:
+    taskQueueName: other-test-tq
 testGetMapPropertyKey:
 - value:
     key1: "1"
@@ -61,10 +70,17 @@ testGetMapPropertyKey:
   constraints: {}
 - value: "1"
   constraints:
-    taskQueueName: random taskqueue
+    namespace: random-namespace
 testGetStringPropertyKey:
 - value: some random string
   constraints: {}
 - value: constrained-string
   constraints:
-    taskQueueName: random taskqueue
+    namespace: random-namespace
+testGetDurationPropertyFilteredByTaskTypeKey:
+  - value: 10s
+    constraints:
+      historytasktype: ActivityRetryTimer
+  - value: 10s
+    constraints:
+      historytasktype: 1

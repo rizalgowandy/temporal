@@ -22,15 +22,18 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-//go:generate mockgen -copyright_file ../../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination processor_mock.go
+// TODO: enable this after https://github.com/golang/mock/issues/621
+// mockgen -copyright_file ../../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination processor_mock.go
 
 package elasticsearch
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,6 +43,7 @@ import (
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/collection"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/future"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
@@ -48,12 +52,12 @@ import (
 )
 
 type (
-	// Processor is interface for elastic search bulk processor
+	// Processor is interface for Elasticsearch bulk processor
 	Processor interface {
-		common.Daemon
-
 		// Add request to bulk processor.
-		Add(request *client.BulkableRequest, visibilityTaskKey string) <-chan bool
+		Add(request *client.BulkableRequest, visibilityTaskKey string) *future.FutureImpl[bool]
+		Start()
+		Stop()
 	}
 
 	// processorImpl implements Processor, it's an agent of elastic.BulkProcessor
@@ -62,10 +66,11 @@ type (
 		bulkProcessor           client.BulkProcessor
 		bulkProcessorParameters *client.BulkProcessorParameters
 		client                  client.Client
-		mapToAckChan            collection.ConcurrentTxMap // used to map ES request to ack channel
+		mapToAckFuture          collection.ConcurrentTxMap // used to map ES request to ack channel
 		logger                  log.Logger
-		metricsClient           metrics.Client
+		metricsHandler          metrics.Handler
 		indexerConcurrency      uint32
+		shutdownLock            sync.RWMutex
 	}
 
 	// ProcessorConfig contains all configs for processor
@@ -80,21 +85,22 @@ type (
 		ESProcessorAckTimeout dynamicconfig.DurationPropertyFn
 	}
 
-	ackChan struct { // value of processorImpl.mapToAckChan
-		ackChInternal chan bool
-		createdAt     time.Time    // Time when request was created (used to report metrics).
-		addedAt       atomic.Value // of time.Time // Time when request was added to bulk processor (used to report metrics).
-		startedAt     time.Time    // Time when request was sent to Elasticsearch by bulk processor (used to report metrics).
+	ackFuture struct { // value of processorImpl.mapToAckFuture
+		future    *future.FutureImpl[bool]
+		createdAt time.Time    // Time when request was created (used to report metrics).
+		addedAt   atomic.Value // of time.Time // Time when request was added to bulk processor (used to report metrics).
+		startedAt time.Time    // Time when request was sent to Elasticsearch by bulk processor (used to report metrics).
 	}
 )
 
 var _ Processor = (*processorImpl)(nil)
 
 const (
-	// retry configs for es bulk processor
-	esProcessorInitialRetryInterval = 200 * time.Millisecond
-	esProcessorMaxRetryInterval     = 20 * time.Second
-	visibilityProcessorName         = "visibility-processor"
+	visibilityProcessorName = "visibility-processor"
+)
+
+var (
+	errVisibilityShutdown = errors.New("visiblity processor was shut down")
 )
 
 // NewProcessor create new processorImpl
@@ -102,14 +108,14 @@ func NewProcessor(
 	cfg *ProcessorConfig,
 	esClient client.Client,
 	logger log.Logger,
-	metricsClient metrics.Client,
+	metricsHandler metrics.Handler,
 ) *processorImpl {
 
 	p := &processorImpl{
 		status:             common.DaemonStatusInitialized,
 		client:             esClient,
 		logger:             log.With(logger, tag.ComponentIndexerESProcessor),
-		metricsClient:      metricsClient,
+		metricsHandler:     metricsHandler.WithTags(metrics.OperationTag(metrics.ElasticsearchBulkProcessor)),
 		indexerConcurrency: uint32(cfg.IndexerConcurrency()),
 		bulkProcessorParameters: &client.BulkProcessorParameters{
 			Name:          visibilityProcessorName,
@@ -117,7 +123,6 @@ func NewProcessor(
 			BulkActions:   cfg.ESProcessorBulkActions(),
 			BulkSize:      cfg.ESProcessorBulkSize(),
 			FlushInterval: cfg.ESProcessorFlushInterval(),
-			Backoff:       elastic.NewExponentialBackoff(esProcessorInitialRetryInterval, esProcessorMaxRetryInterval),
 		},
 	}
 	p.bulkProcessorParameters.AfterFunc = p.bulkAfterAction
@@ -135,7 +140,7 @@ func (p *processorImpl) Start() {
 	}
 
 	var err error
-	p.mapToAckChan = collection.NewShardedConcurrentTxMap(1024, p.hashFn)
+	p.mapToAckFuture = collection.NewShardedConcurrentTxMap(1024, p.hashFn)
 	p.bulkProcessor, err = p.client.RunBulkProcessor(context.Background(), p.bulkProcessorParameters)
 	if err != nil {
 		p.logger.Fatal("Unable to start Elasticsearch processor.", tag.LifeCycleStartFailed, tag.Error(err))
@@ -151,12 +156,15 @@ func (p *processorImpl) Stop() {
 		return
 	}
 
+	p.shutdownLock.Lock()
+	defer p.shutdownLock.Unlock()
+
 	err := p.bulkProcessor.Stop()
 	if err != nil {
-		p.logger.Fatal("Unable to stop Elasticsearch processor.", tag.LifeCycleStopFailed, tag.Error(err))
+		// This could happen if ES is down when we're trying to shut down the server.
+		p.logger.Error("Unable to stop Elasticsearch processor.", tag.LifeCycleStopFailed, tag.Error(err))
+		return
 	}
-	p.mapToAckChan = nil
-	p.bulkProcessor = nil
 }
 
 func (p *processorImpl) hashFn(key interface{}) uint32 {
@@ -169,46 +177,54 @@ func (p *processorImpl) hashFn(key interface{}) uint32 {
 	return hash % p.indexerConcurrency
 }
 
-// Add request to the bulk and return ack channel which will receive ack signal when request is processed.
-func (p *processorImpl) Add(request *client.BulkableRequest, visibilityTaskKey string) <-chan bool {
-	ackCh := newAckChan()
-	_, isDup, _ := p.mapToAckChan.PutOrDo(visibilityTaskKey, ackCh, func(key interface{}, value interface{}) error {
-		ackChExisting, ok := value.(*ackChan)
+// Add request to the bulk and return a future object which will receive ack signal when request is processed.
+func (p *processorImpl) Add(request *client.BulkableRequest, visibilityTaskKey string) *future.FutureImpl[bool] {
+	newFuture := newAckFuture() // Create future first to measure impact of following RWLock on latency
+
+	p.shutdownLock.RLock()
+	defer p.shutdownLock.RUnlock()
+
+	if atomic.LoadInt32(&p.status) == common.DaemonStatusStopped {
+		p.logger.Warn("Rejecting ES request for visibility task key because processor has been shut down.", tag.Key(visibilityTaskKey), tag.ESDocID(request.ID), tag.Value(request.Doc))
+		newFuture.future.Set(false, errVisibilityShutdown)
+		return newFuture.future
+	}
+
+	_, isDup, _ := p.mapToAckFuture.PutOrDo(visibilityTaskKey, newFuture, func(key interface{}, value interface{}) error {
+		existingFuture, ok := value.(*ackFuture)
 		if !ok {
-			p.logger.Fatal(fmt.Sprintf("mapToAckChan has item of a wrong type %T (%T expected).", value, &ackChan{}), tag.Value(key))
+			p.logger.Fatal(fmt.Sprintf("mapToAckFuture has item of a wrong type %T (%T expected).", value, &ackFuture{}), tag.Value(key))
 		}
 
-		p.logger.Warn("Skipping duplicate ES request for visibility task key.", tag.Key(visibilityTaskKey), tag.ESDocID(request.ID), tag.Value(request.Doc), tag.NewDurationTag("interval-between-duplicates", ackCh.createdAt.Sub(ackChExisting.createdAt)))
-		p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorDuplicateRequest)
-
-		// Ack duplicate visibility task right away as if it is processed successfully.
-		ackCh.done(true, p.metricsClient)
+		p.logger.Warn("Skipping duplicate ES request for visibility task key.", tag.Key(visibilityTaskKey), tag.ESDocID(request.ID), tag.Value(request.Doc), tag.NewDurationTag("interval-between-duplicates", newFuture.createdAt.Sub(existingFuture.createdAt)))
+		p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorDuplicateRequest.GetMetricName()).Record(1)
+		newFuture = existingFuture
 		return nil
 	})
 	if !isDup {
 		p.bulkProcessor.Add(request)
-		ackCh.recordAdd(p.metricsClient)
+		newFuture.recordAdd(p.metricsHandler)
 	}
-	return ackCh.ackChInternal
+	return newFuture.future
 }
 
 // bulkBeforeAction is triggered before bulk processor commit
 func (p *processorImpl) bulkBeforeAction(_ int64, requests []elastic.BulkableRequest) {
-	p.metricsClient.AddCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorRequests, int64(len(requests)))
-	p.metricsClient.RecordDistribution(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorBulkSize, len(requests))
-	p.metricsClient.RecordDistribution(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorQueuedRequests, p.mapToAckChan.Len()-len(requests))
+	p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorRequests.GetMetricName()).Record(int64(len(requests)))
+	p.metricsHandler.Histogram(metrics.ElasticsearchBulkProcessorBulkSize.GetMetricName(), metrics.ElasticsearchBulkProcessorBulkSize.GetMetricUnit()).
+		Record(int64(len(requests)))
 
 	for _, request := range requests {
 		visibilityTaskKey := p.extractVisibilityTaskKey(request)
 		if visibilityTaskKey == "" {
 			continue
 		}
-		_, _, _ = p.mapToAckChan.GetAndDo(visibilityTaskKey, func(key interface{}, value interface{}) error {
-			ackCh, ok := value.(*ackChan)
+		_, _, _ = p.mapToAckFuture.GetAndDo(visibilityTaskKey, func(key interface{}, value interface{}) error {
+			ackF, ok := value.(*ackFuture)
 			if !ok {
-				p.logger.Fatal(fmt.Sprintf("mapToAckChan has item of a wrong type %T (%T expected).", value, &ackChan{}), tag.Value(key))
+				p.logger.Fatal(fmt.Sprintf("mapToAckFuture has item of a wrong type %T (%T expected).", value, &ackFuture{}), tag.Value(key))
 			}
-			ackCh.recordStart(p.metricsClient)
+			ackF.recordStart(p.metricsHandler)
 			return nil
 		})
 	}
@@ -218,27 +234,32 @@ func (p *processorImpl) bulkBeforeAction(_ int64, requests []elastic.BulkableReq
 func (p *processorImpl) bulkAfterAction(_ int64, requests []elastic.BulkableRequest, response *elastic.BulkResponse, err error) {
 	if err != nil {
 		const logFirstNRequests = 5
-		httpStatus := client.HttpStatus(err)
-		isRetryable := client.IsRetryableStatus(httpStatus)
+		var httpStatus int
+		var esErr *elastic.Error
+		if errors.As(err, &esErr) {
+			httpStatus = esErr.Status
+		}
+
 		var logRequests strings.Builder
 		for i, request := range requests {
 			if i < logFirstNRequests {
 				logRequests.WriteString(request.String())
 				logRequests.WriteRune('\n')
 			}
-			p.metricsClient.Scope(metrics.ElasticsearchBulkProcessor, metrics.HttpStatusTag(httpStatus)).IncCounter(metrics.ElasticsearchBulkProcessorFailures)
-
-			if !isRetryable {
-				visibilityTaskKey := p.extractVisibilityTaskKey(request)
-				if visibilityTaskKey == "" {
-					continue
-				}
-				p.sendToAckChan(visibilityTaskKey, false)
+			p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorFailures.GetMetricName()).Record(1, metrics.HttpStatusTag(httpStatus))
+			visibilityTaskKey := p.extractVisibilityTaskKey(request)
+			if visibilityTaskKey == "" {
+				continue
 			}
+			p.notifyResult(visibilityTaskKey, false)
 		}
-		p.logger.Error("Unable to commit bulk ES request.", tag.Error(err), tag.IsRetryable(isRetryable), tag.RequestCount(len(requests)), tag.ESRequest(logRequests.String()))
+		p.logger.Error("Unable to commit bulk ES request.", tag.Error(err), tag.RequestCount(len(requests)), tag.ESRequest(logRequests.String()))
 		return
 	}
+
+	// Record how long the Elasticsearch took to process the bulk request.
+	p.metricsHandler.Timer(metrics.ElasticsearchBulkProcessorBulkResquestTookLatency.GetMetricName()).
+		Record(time.Duration(response.Took) * time.Millisecond)
 
 	responseIndex := p.buildResponseIndex(response)
 	for i, request := range requests {
@@ -255,33 +276,29 @@ func (p *processorImpl) bulkAfterAction(_ int64, requests []elastic.BulkableRequ
 				tag.Key(visibilityTaskKey),
 				tag.ESDocID(docID),
 				tag.ESRequest(request.String()))
-			p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
-			p.sendToAckChan(visibilityTaskKey, false)
+			p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
+			p.notifyResult(visibilityTaskKey, false)
 			continue
 		}
 
-		switch {
-		case isSuccess(responseItem):
-			p.sendToAckChan(visibilityTaskKey, true)
-		case !client.IsRetryableStatus(responseItem.Status):
+		if !isSuccess(responseItem) {
 			p.logger.Error("ES request failed.",
 				tag.ESResponseStatus(responseItem.Status),
 				tag.ESResponseError(extractErrorReason(responseItem)),
 				tag.Key(visibilityTaskKey),
 				tag.ESDocID(docID),
 				tag.ESRequest(request.String()))
-			p.metricsClient.Scope(metrics.ElasticsearchBulkProcessor, metrics.HttpStatusTag(responseItem.Status)).IncCounter(metrics.ElasticsearchBulkProcessorFailures)
-			p.sendToAckChan(visibilityTaskKey, false)
-		default: // bulk processor will retry
-			p.logger.Warn("ES request retried.",
-				tag.ESResponseStatus(responseItem.Status),
-				tag.ESResponseError(extractErrorReason(responseItem)),
-				tag.Key(visibilityTaskKey),
-				tag.ESDocID(docID),
-				tag.ESRequest(request.String()))
-			p.metricsClient.Scope(metrics.ElasticsearchBulkProcessor, metrics.HttpStatusTag(responseItem.Status)).IncCounter(metrics.ElasticsearchBulkProcessorRetries)
+			p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorFailures.GetMetricName()).Record(1, metrics.HttpStatusTag(responseItem.Status))
+			p.notifyResult(visibilityTaskKey, false)
+			continue
 		}
+
+		p.notifyResult(visibilityTaskKey, true)
 	}
+
+	// Record how many documents are waiting to be flushed to Elasticsearch after this bulk is committed.
+	p.metricsHandler.Histogram(metrics.ElasticsearchBulkProcessorQueuedRequests.GetMetricName(), metrics.ElasticsearchBulkProcessorBulkSize.GetMetricUnit()).
+		Record(int64(p.mapToAckFuture.Len()))
 }
 
 func (p *processorImpl) buildResponseIndex(response *elastic.BulkResponse) map[string]*elastic.BulkResponseItem {
@@ -300,15 +317,15 @@ func (p *processorImpl) buildResponseIndex(response *elastic.BulkResponse) map[s
 	return result
 }
 
-func (p *processorImpl) sendToAckChan(visibilityTaskKey string, ack bool) {
+func (p *processorImpl) notifyResult(visibilityTaskKey string, ack bool) {
 	// Use RemoveIf here to prevent race condition with de-dup logic in Add method.
-	_ = p.mapToAckChan.RemoveIf(visibilityTaskKey, func(key interface{}, value interface{}) bool {
-		ackCh, ok := value.(*ackChan)
+	_ = p.mapToAckFuture.RemoveIf(visibilityTaskKey, func(key interface{}, value interface{}) bool {
+		ackF, ok := value.(*ackFuture)
 		if !ok {
-			p.logger.Fatal(fmt.Sprintf("mapToAckChan has item of a wrong type %T (%T expected).", value, &ackChan{}), tag.ESKey(visibilityTaskKey))
+			p.logger.Fatal(fmt.Sprintf("mapToAckFuture has item of a wrong type %T (%T expected).", value, &ackFuture{}), tag.ESKey(visibilityTaskKey))
 		}
 
-		ackCh.done(ack, p.metricsClient)
+		ackF.done(ack, p.metricsHandler)
 		return true
 	})
 }
@@ -317,7 +334,7 @@ func (p *processorImpl) extractVisibilityTaskKey(request elastic.BulkableRequest
 	req, err := request.Source()
 	if err != nil {
 		p.logger.Error("Unable to get ES request source.", tag.Error(err), tag.ESRequest(request.String()))
-		p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+		p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
 		return ""
 	}
 
@@ -325,14 +342,14 @@ func (p *processorImpl) extractVisibilityTaskKey(request elastic.BulkableRequest
 		var body map[string]interface{}
 		if err = json.Unmarshal([]byte(req[1]), &body); err != nil {
 			p.logger.Error("Unable to unmarshal ES request body.", tag.Error(err))
-			p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+			p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
 			return ""
 		}
 
 		k, ok := body[searchattribute.VisibilityTaskKey]
 		if !ok {
 			p.logger.Error("Unable to extract VisibilityTaskKey from ES request.", tag.ESRequest(request.String()))
-			p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+			p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
 			return ""
 		}
 		return k.(string)
@@ -345,14 +362,15 @@ func (p *processorImpl) extractDocID(request elastic.BulkableRequest) string {
 	req, err := request.Source()
 	if err != nil {
 		p.logger.Error("Unable to get ES request source.", tag.Error(err), tag.ESRequest(request.String()))
-		p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+		p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
+
 		return ""
 	}
 
 	var body map[string]map[string]interface{}
 	if err = json.Unmarshal([]byte(req[0]), &body); err != nil {
 		p.logger.Error("Unable to unmarshal ES request body.", tag.Error(err), tag.ESRequest(request.String()))
-		p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+		p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
 		return ""
 	}
 
@@ -365,7 +383,7 @@ func (p *processorImpl) extractDocID(request elastic.BulkableRequest) string {
 	}
 
 	p.logger.Error("Unable to extract _id from ES request.", tag.ESRequest(request.String()))
-	p.metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCorruptedData)
+	p.metricsHandler.Counter(metrics.ElasticsearchBulkProcessorCorruptedData.GetMetricName()).Record(1)
 	return ""
 }
 
@@ -398,41 +416,37 @@ func extractErrorReason(resp *elastic.BulkResponseItem) string {
 	return ""
 }
 
-func newAckChan() *ackChan {
+func newAckFuture() *ackFuture {
 	var addedAt atomic.Value
 	addedAt.Store(time.Time{})
-	return &ackChan{
-		ackChInternal: make(chan bool, 1),
-		createdAt:     time.Now().UTC(),
-		addedAt:       addedAt,
+	return &ackFuture{
+		future:    future.NewFuture[bool](),
+		createdAt: time.Now().UTC(),
+		addedAt:   addedAt,
 	}
 }
 
-func (a *ackChan) recordAdd(metricsClient metrics.Client) {
+func (a *ackFuture) recordAdd(metricsHandler metrics.Handler) {
 	addedAt := time.Now().UTC()
 	a.addedAt.Store(addedAt)
-	metricsClient.RecordTimer(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorWaitAddLatency, addedAt.Sub(a.createdAt))
+	metricsHandler.Timer(metrics.ElasticsearchBulkProcessorWaitAddLatency.GetMetricName()).Record(addedAt.Sub(a.createdAt))
 }
 
-func (a *ackChan) recordStart(metricsClient metrics.Client) {
+func (a *ackFuture) recordStart(metricsHandler metrics.Handler) {
 	a.startedAt = time.Now().UTC()
 	addedAt := a.addedAt.Load().(time.Time)
 	if !addedAt.IsZero() {
-		metricsClient.RecordTimer(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorWaitStartLatency, a.startedAt.Sub(addedAt))
+		metricsHandler.Timer(metrics.ElasticsearchBulkProcessorWaitStartLatency.GetMetricName()).Record(a.startedAt.Sub(addedAt))
 	}
 }
 
-func (a *ackChan) done(ack bool, metricsClient metrics.Client) {
-	select {
-	case a.ackChInternal <- ack:
-		doneAt := time.Now().UTC()
-		if !a.createdAt.IsZero() {
-			metricsClient.RecordTimer(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorRequestLatency, doneAt.Sub(a.createdAt))
-		}
-		if !a.startedAt.IsZero() {
-			metricsClient.RecordTimer(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorCommitLatency, doneAt.Sub(a.startedAt))
-		}
-	default:
-		metricsClient.IncCounter(metrics.ElasticsearchBulkProcessor, metrics.ElasticsearchBulkProcessorDeadlock)
+func (a *ackFuture) done(ack bool, metricsHandler metrics.Handler) {
+	a.future.Set(ack, nil)
+	doneAt := time.Now().UTC()
+	if !a.createdAt.IsZero() {
+		metricsHandler.Timer(metrics.ElasticsearchBulkProcessorRequestLatency.GetMetricName()).Record(doneAt.Sub(a.createdAt))
+	}
+	if !a.startedAt.IsZero() {
+		metricsHandler.Timer(metrics.ElasticsearchBulkProcessorCommitLatency.GetMetricName()).Record(doneAt.Sub(a.startedAt))
 	}
 }

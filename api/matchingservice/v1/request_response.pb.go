@@ -43,12 +43,16 @@ import (
 	_ "github.com/gogo/protobuf/types"
 	github_com_gogo_protobuf_types "github.com/gogo/protobuf/types"
 	v11 "go.temporal.io/api/common/v1"
-	v16 "go.temporal.io/api/enums/v1"
+	v19 "go.temporal.io/api/enums/v1"
+	v15 "go.temporal.io/api/protocol/v1"
 	v12 "go.temporal.io/api/query/v1"
 	v14 "go.temporal.io/api/taskqueue/v1"
 	v1 "go.temporal.io/api/workflowservice/v1"
-	v15 "go.temporal.io/server/api/enums/v1"
+	v17 "go.temporal.io/server/api/clock/v1"
+	v16 "go.temporal.io/server/api/enums/v1"
 	v13 "go.temporal.io/server/api/history/v1"
+	v110 "go.temporal.io/server/api/persistence/v1"
+	v18 "go.temporal.io/server/api/taskqueue/v1"
 )
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -141,12 +145,13 @@ type PollWorkflowTaskQueueResponse struct {
 	BacklogCountHint           int64                          `protobuf:"varint,8,opt,name=backlog_count_hint,json=backlogCountHint,proto3" json:"backlog_count_hint,omitempty"`
 	StickyExecutionEnabled     bool                           `protobuf:"varint,9,opt,name=sticky_execution_enabled,json=stickyExecutionEnabled,proto3" json:"sticky_execution_enabled,omitempty"`
 	Query                      *v12.WorkflowQuery             `protobuf:"bytes,10,opt,name=query,proto3" json:"query,omitempty"`
-	WorkflowTaskInfo           *v13.TransientWorkflowTaskInfo `protobuf:"bytes,11,opt,name=workflow_task_info,json=workflowTaskInfo,proto3" json:"workflow_task_info,omitempty"`
+	TransientWorkflowTask      *v13.TransientWorkflowTaskInfo `protobuf:"bytes,11,opt,name=transient_workflow_task,json=transientWorkflowTask,proto3" json:"transient_workflow_task,omitempty"`
 	WorkflowExecutionTaskQueue *v14.TaskQueue                 `protobuf:"bytes,12,opt,name=workflow_execution_task_queue,json=workflowExecutionTaskQueue,proto3" json:"workflow_execution_task_queue,omitempty"`
 	BranchToken                []byte                         `protobuf:"bytes,14,opt,name=branch_token,json=branchToken,proto3" json:"branch_token,omitempty"`
 	ScheduledTime              *time.Time                     `protobuf:"bytes,15,opt,name=scheduled_time,json=scheduledTime,proto3,stdtime" json:"scheduled_time,omitempty"`
 	StartedTime                *time.Time                     `protobuf:"bytes,16,opt,name=started_time,json=startedTime,proto3,stdtime" json:"started_time,omitempty"`
 	Queries                    map[string]*v12.WorkflowQuery  `protobuf:"bytes,17,rep,name=queries,proto3" json:"queries,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	Messages                   []*v15.Message                 `protobuf:"bytes,18,rep,name=messages,proto3" json:"messages,omitempty"`
 }
 
 func (m *PollWorkflowTaskQueueResponse) Reset()      { *m = PollWorkflowTaskQueueResponse{} }
@@ -251,9 +256,9 @@ func (m *PollWorkflowTaskQueueResponse) GetQuery() *v12.WorkflowQuery {
 	return nil
 }
 
-func (m *PollWorkflowTaskQueueResponse) GetWorkflowTaskInfo() *v13.TransientWorkflowTaskInfo {
+func (m *PollWorkflowTaskQueueResponse) GetTransientWorkflowTask() *v13.TransientWorkflowTaskInfo {
 	if m != nil {
-		return m.WorkflowTaskInfo
+		return m.TransientWorkflowTask
 	}
 	return nil
 }
@@ -289,6 +294,13 @@ func (m *PollWorkflowTaskQueueResponse) GetStartedTime() *time.Time {
 func (m *PollWorkflowTaskQueueResponse) GetQueries() map[string]*v12.WorkflowQuery {
 	if m != nil {
 		return m.Queries
+	}
+	return nil
+}
+
+func (m *PollWorkflowTaskQueueResponse) GetMessages() []*v15.Message {
+	if m != nil {
+		return m.Messages
 	}
 	return nil
 }
@@ -528,15 +540,19 @@ func (m *PollActivityTaskQueueResponse) GetHeader() *v11.Header {
 }
 
 type AddWorkflowTaskRequest struct {
-	NamespaceId string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
-	Execution   *v11.WorkflowExecution `protobuf:"bytes,2,opt,name=execution,proto3" json:"execution,omitempty"`
-	TaskQueue   *v14.TaskQueue         `protobuf:"bytes,3,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
-	ScheduleId  int64                  `protobuf:"varint,4,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	NamespaceId      string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Execution        *v11.WorkflowExecution `protobuf:"bytes,2,opt,name=execution,proto3" json:"execution,omitempty"`
+	TaskQueue        *v14.TaskQueue         `protobuf:"bytes,3,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	ScheduledEventId int64                  `protobuf:"varint,4,opt,name=scheduled_event_id,json=scheduledEventId,proto3" json:"scheduled_event_id,omitempty"`
 	// (-- api-linter: core::0140::prepositions=disabled
 	//     aip.dev/not-precedent: "to" is used to indicate interval. --)
-	ScheduleToStartTimeout *time.Duration `protobuf:"bytes,5,opt,name=schedule_to_start_timeout,json=scheduleToStartTimeout,proto3,stdduration" json:"schedule_to_start_timeout,omitempty"`
-	ForwardedSource        string         `protobuf:"bytes,6,opt,name=forwarded_source,json=forwardedSource,proto3" json:"forwarded_source,omitempty"`
-	Source                 v15.TaskSource `protobuf:"varint,7,opt,name=source,proto3,enum=temporal.server.api.enums.v1.TaskSource" json:"source,omitempty"`
+	ScheduleToStartTimeout *time.Duration   `protobuf:"bytes,5,opt,name=schedule_to_start_timeout,json=scheduleToStartTimeout,proto3,stdduration" json:"schedule_to_start_timeout,omitempty"`
+	ForwardedSource        string           `protobuf:"bytes,6,opt,name=forwarded_source,json=forwardedSource,proto3" json:"forwarded_source,omitempty"`
+	Source                 v16.TaskSource   `protobuf:"varint,7,opt,name=source,proto3,enum=temporal.server.api.enums.v1.TaskSource" json:"source,omitempty"`
+	Clock                  *v17.VectorClock `protobuf:"bytes,9,opt,name=clock,proto3" json:"clock,omitempty"`
+	// How this task should be directed by matching. (Missing means the default
+	// for TaskVersionDirective, which is unversioned.)
+	VersionDirective *v18.TaskVersionDirective `protobuf:"bytes,10,opt,name=version_directive,json=versionDirective,proto3" json:"version_directive,omitempty"`
 }
 
 func (m *AddWorkflowTaskRequest) Reset()      { *m = AddWorkflowTaskRequest{} }
@@ -592,9 +608,9 @@ func (m *AddWorkflowTaskRequest) GetTaskQueue() *v14.TaskQueue {
 	return nil
 }
 
-func (m *AddWorkflowTaskRequest) GetScheduleId() int64 {
+func (m *AddWorkflowTaskRequest) GetScheduledEventId() int64 {
 	if m != nil {
-		return m.ScheduleId
+		return m.ScheduledEventId
 	}
 	return 0
 }
@@ -613,11 +629,25 @@ func (m *AddWorkflowTaskRequest) GetForwardedSource() string {
 	return ""
 }
 
-func (m *AddWorkflowTaskRequest) GetSource() v15.TaskSource {
+func (m *AddWorkflowTaskRequest) GetSource() v16.TaskSource {
 	if m != nil {
 		return m.Source
 	}
-	return v15.TASK_SOURCE_UNSPECIFIED
+	return v16.TASK_SOURCE_UNSPECIFIED
+}
+
+func (m *AddWorkflowTaskRequest) GetClock() *v17.VectorClock {
+	if m != nil {
+		return m.Clock
+	}
+	return nil
+}
+
+func (m *AddWorkflowTaskRequest) GetVersionDirective() *v18.TaskVersionDirective {
+	if m != nil {
+		return m.VersionDirective
+	}
+	return nil
 }
 
 type AddWorkflowTaskResponse struct {
@@ -656,16 +686,19 @@ func (m *AddWorkflowTaskResponse) XXX_DiscardUnknown() {
 var xxx_messageInfo_AddWorkflowTaskResponse proto.InternalMessageInfo
 
 type AddActivityTaskRequest struct {
-	NamespaceId       string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
-	Execution         *v11.WorkflowExecution `protobuf:"bytes,2,opt,name=execution,proto3" json:"execution,omitempty"`
-	SourceNamespaceId string                 `protobuf:"bytes,3,opt,name=source_namespace_id,json=sourceNamespaceId,proto3" json:"source_namespace_id,omitempty"`
-	TaskQueue         *v14.TaskQueue         `protobuf:"bytes,4,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
-	ScheduleId        int64                  `protobuf:"varint,5,opt,name=schedule_id,json=scheduleId,proto3" json:"schedule_id,omitempty"`
+	NamespaceId      string                 `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Execution        *v11.WorkflowExecution `protobuf:"bytes,2,opt,name=execution,proto3" json:"execution,omitempty"`
+	TaskQueue        *v14.TaskQueue         `protobuf:"bytes,4,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	ScheduledEventId int64                  `protobuf:"varint,5,opt,name=scheduled_event_id,json=scheduledEventId,proto3" json:"scheduled_event_id,omitempty"`
 	// (-- api-linter: core::0140::prepositions=disabled
 	//     aip.dev/not-precedent: "to" is used to indicate interval. --)
-	ScheduleToStartTimeout *time.Duration `protobuf:"bytes,6,opt,name=schedule_to_start_timeout,json=scheduleToStartTimeout,proto3,stdduration" json:"schedule_to_start_timeout,omitempty"`
-	ForwardedSource        string         `protobuf:"bytes,7,opt,name=forwarded_source,json=forwardedSource,proto3" json:"forwarded_source,omitempty"`
-	Source                 v15.TaskSource `protobuf:"varint,8,opt,name=source,proto3,enum=temporal.server.api.enums.v1.TaskSource" json:"source,omitempty"`
+	ScheduleToStartTimeout *time.Duration   `protobuf:"bytes,6,opt,name=schedule_to_start_timeout,json=scheduleToStartTimeout,proto3,stdduration" json:"schedule_to_start_timeout,omitempty"`
+	ForwardedSource        string           `protobuf:"bytes,7,opt,name=forwarded_source,json=forwardedSource,proto3" json:"forwarded_source,omitempty"`
+	Source                 v16.TaskSource   `protobuf:"varint,8,opt,name=source,proto3,enum=temporal.server.api.enums.v1.TaskSource" json:"source,omitempty"`
+	Clock                  *v17.VectorClock `protobuf:"bytes,9,opt,name=clock,proto3" json:"clock,omitempty"`
+	// How this task should be directed by matching. (Missing means the default
+	// for TaskVersionDirective, which is unversioned.)
+	VersionDirective *v18.TaskVersionDirective `protobuf:"bytes,10,opt,name=version_directive,json=versionDirective,proto3" json:"version_directive,omitempty"`
 }
 
 func (m *AddActivityTaskRequest) Reset()      { *m = AddActivityTaskRequest{} }
@@ -714,13 +747,6 @@ func (m *AddActivityTaskRequest) GetExecution() *v11.WorkflowExecution {
 	return nil
 }
 
-func (m *AddActivityTaskRequest) GetSourceNamespaceId() string {
-	if m != nil {
-		return m.SourceNamespaceId
-	}
-	return ""
-}
-
 func (m *AddActivityTaskRequest) GetTaskQueue() *v14.TaskQueue {
 	if m != nil {
 		return m.TaskQueue
@@ -728,9 +754,9 @@ func (m *AddActivityTaskRequest) GetTaskQueue() *v14.TaskQueue {
 	return nil
 }
 
-func (m *AddActivityTaskRequest) GetScheduleId() int64 {
+func (m *AddActivityTaskRequest) GetScheduledEventId() int64 {
 	if m != nil {
-		return m.ScheduleId
+		return m.ScheduledEventId
 	}
 	return 0
 }
@@ -749,11 +775,25 @@ func (m *AddActivityTaskRequest) GetForwardedSource() string {
 	return ""
 }
 
-func (m *AddActivityTaskRequest) GetSource() v15.TaskSource {
+func (m *AddActivityTaskRequest) GetSource() v16.TaskSource {
 	if m != nil {
 		return m.Source
 	}
-	return v15.TASK_SOURCE_UNSPECIFIED
+	return v16.TASK_SOURCE_UNSPECIFIED
+}
+
+func (m *AddActivityTaskRequest) GetClock() *v17.VectorClock {
+	if m != nil {
+		return m.Clock
+	}
+	return nil
+}
+
+func (m *AddActivityTaskRequest) GetVersionDirective() *v18.TaskVersionDirective {
+	if m != nil {
+		return m.VersionDirective
+	}
+	return nil
 }
 
 type AddActivityTaskResponse struct {
@@ -796,6 +836,9 @@ type QueryWorkflowRequest struct {
 	TaskQueue       *v14.TaskQueue           `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
 	QueryRequest    *v1.QueryWorkflowRequest `protobuf:"bytes,3,opt,name=query_request,json=queryRequest,proto3" json:"query_request,omitempty"`
 	ForwardedSource string                   `protobuf:"bytes,4,opt,name=forwarded_source,json=forwardedSource,proto3" json:"forwarded_source,omitempty"`
+	// How this task should be directed by matching. (Missing means the default
+	// for TaskVersionDirective, which is unversioned.)
+	VersionDirective *v18.TaskVersionDirective `protobuf:"bytes,5,opt,name=version_directive,json=versionDirective,proto3" json:"version_directive,omitempty"`
 }
 
 func (m *QueryWorkflowRequest) Reset()      { *m = QueryWorkflowRequest{} }
@@ -856,6 +899,13 @@ func (m *QueryWorkflowRequest) GetForwardedSource() string {
 		return m.ForwardedSource
 	}
 	return ""
+}
+
+func (m *QueryWorkflowRequest) GetVersionDirective() *v18.TaskVersionDirective {
+	if m != nil {
+		return m.VersionDirective
+	}
+	return nil
 }
 
 type QueryWorkflowResponse struct {
@@ -1013,7 +1063,7 @@ var xxx_messageInfo_RespondQueryTaskCompletedResponse proto.InternalMessageInfo
 
 type CancelOutstandingPollRequest struct {
 	NamespaceId   string            `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
-	TaskQueueType v16.TaskQueueType `protobuf:"varint,2,opt,name=task_queue_type,json=taskQueueType,proto3,enum=temporal.api.enums.v1.TaskQueueType" json:"task_queue_type,omitempty"`
+	TaskQueueType v19.TaskQueueType `protobuf:"varint,2,opt,name=task_queue_type,json=taskQueueType,proto3,enum=temporal.api.enums.v1.TaskQueueType" json:"task_queue_type,omitempty"`
 	TaskQueue     *v14.TaskQueue    `protobuf:"bytes,3,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
 	PollerId      string            `protobuf:"bytes,4,opt,name=poller_id,json=pollerId,proto3" json:"poller_id,omitempty"`
 }
@@ -1057,11 +1107,11 @@ func (m *CancelOutstandingPollRequest) GetNamespaceId() string {
 	return ""
 }
 
-func (m *CancelOutstandingPollRequest) GetTaskQueueType() v16.TaskQueueType {
+func (m *CancelOutstandingPollRequest) GetTaskQueueType() v19.TaskQueueType {
 	if m != nil {
 		return m.TaskQueueType
 	}
-	return v16.TASK_QUEUE_TYPE_UNSPECIFIED
+	return v19.TASK_QUEUE_TYPE_UNSPECIFIED
 }
 
 func (m *CancelOutstandingPollRequest) GetTaskQueue() *v14.TaskQueue {
@@ -1216,8 +1266,9 @@ func (m *DescribeTaskQueueResponse) GetTaskQueueStatus() *v14.TaskQueueStatus {
 }
 
 type ListTaskQueuePartitionsRequest struct {
-	Namespace string         `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
-	TaskQueue *v14.TaskQueue `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	Namespace   string         `protobuf:"bytes,1,opt,name=namespace,proto3" json:"namespace,omitempty"`
+	NamespaceId string         `protobuf:"bytes,3,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue   *v14.TaskQueue `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
 }
 
 func (m *ListTaskQueuePartitionsRequest) Reset()      { *m = ListTaskQueuePartitionsRequest{} }
@@ -1255,6 +1306,13 @@ var xxx_messageInfo_ListTaskQueuePartitionsRequest proto.InternalMessageInfo
 func (m *ListTaskQueuePartitionsRequest) GetNamespace() string {
 	if m != nil {
 		return m.Namespace
+	}
+	return ""
+}
+
+func (m *ListTaskQueuePartitionsRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
 	}
 	return ""
 }
@@ -1317,6 +1375,1012 @@ func (m *ListTaskQueuePartitionsResponse) GetWorkflowTaskQueuePartitions() []*v1
 	return nil
 }
 
+// (-- api-linter: core::0134::request-mask-required=disabled
+//
+//	aip.dev/not-precedent: UpdateWorkerBuildIdCompatibilityRequest doesn't follow Google API format --)
+//
+// (-- api-linter: core::0134::request-resource-required=disabled
+//
+//	aip.dev/not-precedent: UpdateWorkerBuildIdCompatibilityRequest RPC doesn't follow Google API format. --)
+type UpdateWorkerBuildIdCompatibilityRequest struct {
+	NamespaceId string `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue   string `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	// Types that are valid to be assigned to Operation:
+	//	*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_
+	//	*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_
+	//	*UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId
+	Operation isUpdateWorkerBuildIdCompatibilityRequest_Operation `protobuf_oneof:"operation"`
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) Reset() {
+	*m = UpdateWorkerBuildIdCompatibilityRequest{}
+}
+func (*UpdateWorkerBuildIdCompatibilityRequest) ProtoMessage() {}
+func (*UpdateWorkerBuildIdCompatibilityRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{18}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest.Merge(m, src)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest proto.InternalMessageInfo
+
+type isUpdateWorkerBuildIdCompatibilityRequest_Operation interface {
+	isUpdateWorkerBuildIdCompatibilityRequest_Operation()
+	Equal(interface{}) bool
+	MarshalTo([]byte) (int, error)
+	Size() int
+}
+
+type UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_ struct {
+	ApplyPublicRequest *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest `protobuf:"bytes,3,opt,name=apply_public_request,json=applyPublicRequest,proto3,oneof" json:"apply_public_request,omitempty"`
+}
+type UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_ struct {
+	RemoveBuildIds *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds `protobuf:"bytes,4,opt,name=remove_build_ids,json=removeBuildIds,proto3,oneof" json:"remove_build_ids,omitempty"`
+}
+type UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId struct {
+	PersistUnknownBuildId string `protobuf:"bytes,5,opt,name=persist_unknown_build_id,json=persistUnknownBuildId,proto3,oneof" json:"persist_unknown_build_id,omitempty"`
+}
+
+func (*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) isUpdateWorkerBuildIdCompatibilityRequest_Operation() {
+}
+func (*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) isUpdateWorkerBuildIdCompatibilityRequest_Operation() {
+}
+func (*UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) isUpdateWorkerBuildIdCompatibilityRequest_Operation() {
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetOperation() isUpdateWorkerBuildIdCompatibilityRequest_Operation {
+	if m != nil {
+		return m.Operation
+	}
+	return nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetApplyPublicRequest() *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest {
+	if x, ok := m.GetOperation().(*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_); ok {
+		return x.ApplyPublicRequest
+	}
+	return nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetRemoveBuildIds() *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds {
+	if x, ok := m.GetOperation().(*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_); ok {
+		return x.RemoveBuildIds
+	}
+	return nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) GetPersistUnknownBuildId() string {
+	if x, ok := m.GetOperation().(*UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId); ok {
+		return x.PersistUnknownBuildId
+	}
+	return ""
+}
+
+// XXX_OneofWrappers is for the internal use of the proto package.
+func (*UpdateWorkerBuildIdCompatibilityRequest) XXX_OneofWrappers() []interface{} {
+	return []interface{}{
+		(*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_)(nil),
+		(*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_)(nil),
+		(*UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId)(nil),
+	}
+}
+
+// Apply request from public API.
+type UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest struct {
+	Request *v1.UpdateWorkerBuildIdCompatibilityRequest `protobuf:"bytes,1,opt,name=request,proto3" json:"request,omitempty"`
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Reset() {
+	*m = UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{}
+}
+func (*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) ProtoMessage() {}
+func (*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{18, 0}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest.Merge(m, src)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest proto.InternalMessageInfo
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) GetRequest() *v1.UpdateWorkerBuildIdCompatibilityRequest {
+	if m != nil {
+		return m.Request
+	}
+	return nil
+}
+
+// Remove build ids (internal only)
+type UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds struct {
+	// The last known user data version, used to prevent concurrent updates.
+	KnownUserDataVersion int64 `protobuf:"varint,1,opt,name=known_user_data_version,json=knownUserDataVersion,proto3" json:"known_user_data_version,omitempty"`
+	// List of build ids to remove.
+	BuildIds []string `protobuf:"bytes,2,rep,name=build_ids,json=buildIds,proto3" json:"build_ids,omitempty"`
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Reset() {
+	*m = UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds{}
+}
+func (*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) ProtoMessage() {}
+func (*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{18, 1}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds.Merge(m, src)
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds proto.InternalMessageInfo
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) GetKnownUserDataVersion() int64 {
+	if m != nil {
+		return m.KnownUserDataVersion
+	}
+	return 0
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) GetBuildIds() []string {
+	if m != nil {
+		return m.BuildIds
+	}
+	return nil
+}
+
+type UpdateWorkerBuildIdCompatibilityResponse struct {
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityResponse) Reset() {
+	*m = UpdateWorkerBuildIdCompatibilityResponse{}
+}
+func (*UpdateWorkerBuildIdCompatibilityResponse) ProtoMessage() {}
+func (*UpdateWorkerBuildIdCompatibilityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{19}
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateWorkerBuildIdCompatibilityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityResponse.Merge(m, src)
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateWorkerBuildIdCompatibilityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateWorkerBuildIdCompatibilityResponse proto.InternalMessageInfo
+
+type GetWorkerBuildIdCompatibilityRequest struct {
+	NamespaceId string                                   `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	Request     *v1.GetWorkerBuildIdCompatibilityRequest `protobuf:"bytes,2,opt,name=request,proto3" json:"request,omitempty"`
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) Reset()      { *m = GetWorkerBuildIdCompatibilityRequest{} }
+func (*GetWorkerBuildIdCompatibilityRequest) ProtoMessage() {}
+func (*GetWorkerBuildIdCompatibilityRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{20}
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetWorkerBuildIdCompatibilityRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetWorkerBuildIdCompatibilityRequest.Merge(m, src)
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetWorkerBuildIdCompatibilityRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetWorkerBuildIdCompatibilityRequest proto.InternalMessageInfo
+
+func (m *GetWorkerBuildIdCompatibilityRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) GetRequest() *v1.GetWorkerBuildIdCompatibilityRequest {
+	if m != nil {
+		return m.Request
+	}
+	return nil
+}
+
+type GetWorkerBuildIdCompatibilityResponse struct {
+	Response *v1.GetWorkerBuildIdCompatibilityResponse `protobuf:"bytes,1,opt,name=response,proto3" json:"response,omitempty"`
+}
+
+func (m *GetWorkerBuildIdCompatibilityResponse) Reset()      { *m = GetWorkerBuildIdCompatibilityResponse{} }
+func (*GetWorkerBuildIdCompatibilityResponse) ProtoMessage() {}
+func (*GetWorkerBuildIdCompatibilityResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{21}
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetWorkerBuildIdCompatibilityResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetWorkerBuildIdCompatibilityResponse.Merge(m, src)
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetWorkerBuildIdCompatibilityResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetWorkerBuildIdCompatibilityResponse proto.InternalMessageInfo
+
+func (m *GetWorkerBuildIdCompatibilityResponse) GetResponse() *v1.GetWorkerBuildIdCompatibilityResponse {
+	if m != nil {
+		return m.Response
+	}
+	return nil
+}
+
+type GetTaskQueueUserDataRequest struct {
+	NamespaceId string `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	// The task queue to fetch data from. The task queue is always considered as a normal
+	// queue, since sticky queues have no user data.
+	TaskQueue string `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	// Normally task queue type should always be TASK_QUEUE_TYPE_WORKFLOW here, but querying
+	// activity task queues is useful for testing.
+	TaskQueueType v19.TaskQueueType `protobuf:"varint,5,opt,name=task_queue_type,json=taskQueueType,proto3,enum=temporal.api.enums.v1.TaskQueueType" json:"task_queue_type,omitempty"`
+	// The value of the last known user data version.
+	// If the requester has no data, it should set this to 0.
+	// This value must not be set to a negative number (note that our linter suggests avoiding uint64).
+	LastKnownUserDataVersion int64 `protobuf:"varint,3,opt,name=last_known_user_data_version,json=lastKnownUserDataVersion,proto3" json:"last_known_user_data_version,omitempty"`
+	// If set and last_known_user_data_version is the current version, block until new data is
+	// available (or timeout).
+	WaitNewData bool `protobuf:"varint,4,opt,name=wait_new_data,json=waitNewData,proto3" json:"wait_new_data,omitempty"`
+}
+
+func (m *GetTaskQueueUserDataRequest) Reset()      { *m = GetTaskQueueUserDataRequest{} }
+func (*GetTaskQueueUserDataRequest) ProtoMessage() {}
+func (*GetTaskQueueUserDataRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{22}
+}
+func (m *GetTaskQueueUserDataRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetTaskQueueUserDataRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetTaskQueueUserDataRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetTaskQueueUserDataRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetTaskQueueUserDataRequest.Merge(m, src)
+}
+func (m *GetTaskQueueUserDataRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetTaskQueueUserDataRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetTaskQueueUserDataRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetTaskQueueUserDataRequest proto.InternalMessageInfo
+
+func (m *GetTaskQueueUserDataRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *GetTaskQueueUserDataRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *GetTaskQueueUserDataRequest) GetTaskQueueType() v19.TaskQueueType {
+	if m != nil {
+		return m.TaskQueueType
+	}
+	return v19.TASK_QUEUE_TYPE_UNSPECIFIED
+}
+
+func (m *GetTaskQueueUserDataRequest) GetLastKnownUserDataVersion() int64 {
+	if m != nil {
+		return m.LastKnownUserDataVersion
+	}
+	return 0
+}
+
+func (m *GetTaskQueueUserDataRequest) GetWaitNewData() bool {
+	if m != nil {
+		return m.WaitNewData
+	}
+	return false
+}
+
+type GetTaskQueueUserDataResponse struct {
+	// Whether this task queue has any stored user data
+	TaskQueueHasUserData bool `protobuf:"varint,1,opt,name=task_queue_has_user_data,json=taskQueueHasUserData,proto3" json:"task_queue_has_user_data,omitempty"`
+	// Versioned user data, set if the task queue has user data and the request's last_known_user_data_version is less
+	// than the version cached in the root partition.
+	UserData *v110.VersionedTaskQueueUserData `protobuf:"bytes,2,opt,name=user_data,json=userData,proto3" json:"user_data,omitempty"`
+}
+
+func (m *GetTaskQueueUserDataResponse) Reset()      { *m = GetTaskQueueUserDataResponse{} }
+func (*GetTaskQueueUserDataResponse) ProtoMessage() {}
+func (*GetTaskQueueUserDataResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{23}
+}
+func (m *GetTaskQueueUserDataResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetTaskQueueUserDataResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetTaskQueueUserDataResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetTaskQueueUserDataResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetTaskQueueUserDataResponse.Merge(m, src)
+}
+func (m *GetTaskQueueUserDataResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetTaskQueueUserDataResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetTaskQueueUserDataResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetTaskQueueUserDataResponse proto.InternalMessageInfo
+
+func (m *GetTaskQueueUserDataResponse) GetTaskQueueHasUserData() bool {
+	if m != nil {
+		return m.TaskQueueHasUserData
+	}
+	return false
+}
+
+func (m *GetTaskQueueUserDataResponse) GetUserData() *v110.VersionedTaskQueueUserData {
+	if m != nil {
+		return m.UserData
+	}
+	return nil
+}
+
+type ApplyTaskQueueUserDataReplicationEventRequest struct {
+	NamespaceId string                  `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue   string                  `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	UserData    *v110.TaskQueueUserData `protobuf:"bytes,3,opt,name=user_data,json=userData,proto3" json:"user_data,omitempty"`
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) Reset() {
+	*m = ApplyTaskQueueUserDataReplicationEventRequest{}
+}
+func (*ApplyTaskQueueUserDataReplicationEventRequest) ProtoMessage() {}
+func (*ApplyTaskQueueUserDataReplicationEventRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{24}
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventRequest.Merge(m, src)
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventRequest proto.InternalMessageInfo
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) GetUserData() *v110.TaskQueueUserData {
+	if m != nil {
+		return m.UserData
+	}
+	return nil
+}
+
+type ApplyTaskQueueUserDataReplicationEventResponse struct {
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) Reset() {
+	*m = ApplyTaskQueueUserDataReplicationEventResponse{}
+}
+func (*ApplyTaskQueueUserDataReplicationEventResponse) ProtoMessage() {}
+func (*ApplyTaskQueueUserDataReplicationEventResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{25}
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventResponse.Merge(m, src)
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ApplyTaskQueueUserDataReplicationEventResponse proto.InternalMessageInfo
+
+type GetBuildIdTaskQueueMappingRequest struct {
+	NamespaceId string `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	BuildId     string `protobuf:"bytes,2,opt,name=build_id,json=buildId,proto3" json:"build_id,omitempty"`
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) Reset()      { *m = GetBuildIdTaskQueueMappingRequest{} }
+func (*GetBuildIdTaskQueueMappingRequest) ProtoMessage() {}
+func (*GetBuildIdTaskQueueMappingRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{26}
+}
+func (m *GetBuildIdTaskQueueMappingRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetBuildIdTaskQueueMappingRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetBuildIdTaskQueueMappingRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetBuildIdTaskQueueMappingRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetBuildIdTaskQueueMappingRequest.Merge(m, src)
+}
+func (m *GetBuildIdTaskQueueMappingRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetBuildIdTaskQueueMappingRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetBuildIdTaskQueueMappingRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetBuildIdTaskQueueMappingRequest proto.InternalMessageInfo
+
+func (m *GetBuildIdTaskQueueMappingRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) GetBuildId() string {
+	if m != nil {
+		return m.BuildId
+	}
+	return ""
+}
+
+type GetBuildIdTaskQueueMappingResponse struct {
+	TaskQueues []string `protobuf:"bytes,1,rep,name=task_queues,json=taskQueues,proto3" json:"task_queues,omitempty"`
+}
+
+func (m *GetBuildIdTaskQueueMappingResponse) Reset()      { *m = GetBuildIdTaskQueueMappingResponse{} }
+func (*GetBuildIdTaskQueueMappingResponse) ProtoMessage() {}
+func (*GetBuildIdTaskQueueMappingResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{27}
+}
+func (m *GetBuildIdTaskQueueMappingResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *GetBuildIdTaskQueueMappingResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_GetBuildIdTaskQueueMappingResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *GetBuildIdTaskQueueMappingResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetBuildIdTaskQueueMappingResponse.Merge(m, src)
+}
+func (m *GetBuildIdTaskQueueMappingResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *GetBuildIdTaskQueueMappingResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetBuildIdTaskQueueMappingResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_GetBuildIdTaskQueueMappingResponse proto.InternalMessageInfo
+
+func (m *GetBuildIdTaskQueueMappingResponse) GetTaskQueues() []string {
+	if m != nil {
+		return m.TaskQueues
+	}
+	return nil
+}
+
+type ForceUnloadTaskQueueRequest struct {
+	NamespaceId   string            `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue     string            `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	TaskQueueType v19.TaskQueueType `protobuf:"varint,3,opt,name=task_queue_type,json=taskQueueType,proto3,enum=temporal.api.enums.v1.TaskQueueType" json:"task_queue_type,omitempty"`
+}
+
+func (m *ForceUnloadTaskQueueRequest) Reset()      { *m = ForceUnloadTaskQueueRequest{} }
+func (*ForceUnloadTaskQueueRequest) ProtoMessage() {}
+func (*ForceUnloadTaskQueueRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{28}
+}
+func (m *ForceUnloadTaskQueueRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ForceUnloadTaskQueueRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ForceUnloadTaskQueueRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ForceUnloadTaskQueueRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ForceUnloadTaskQueueRequest.Merge(m, src)
+}
+func (m *ForceUnloadTaskQueueRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *ForceUnloadTaskQueueRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ForceUnloadTaskQueueRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ForceUnloadTaskQueueRequest proto.InternalMessageInfo
+
+func (m *ForceUnloadTaskQueueRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *ForceUnloadTaskQueueRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *ForceUnloadTaskQueueRequest) GetTaskQueueType() v19.TaskQueueType {
+	if m != nil {
+		return m.TaskQueueType
+	}
+	return v19.TASK_QUEUE_TYPE_UNSPECIFIED
+}
+
+type ForceUnloadTaskQueueResponse struct {
+	WasLoaded bool `protobuf:"varint,1,opt,name=was_loaded,json=wasLoaded,proto3" json:"was_loaded,omitempty"`
+}
+
+func (m *ForceUnloadTaskQueueResponse) Reset()      { *m = ForceUnloadTaskQueueResponse{} }
+func (*ForceUnloadTaskQueueResponse) ProtoMessage() {}
+func (*ForceUnloadTaskQueueResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{29}
+}
+func (m *ForceUnloadTaskQueueResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ForceUnloadTaskQueueResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ForceUnloadTaskQueueResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ForceUnloadTaskQueueResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ForceUnloadTaskQueueResponse.Merge(m, src)
+}
+func (m *ForceUnloadTaskQueueResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *ForceUnloadTaskQueueResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ForceUnloadTaskQueueResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ForceUnloadTaskQueueResponse proto.InternalMessageInfo
+
+func (m *ForceUnloadTaskQueueResponse) GetWasLoaded() bool {
+	if m != nil {
+		return m.WasLoaded
+	}
+	return false
+}
+
+// (-- api-linter: core::0134::request-mask-required=disabled
+//
+//	aip.dev/not-precedent: UpdateTaskQueueUserDataRequest doesn't follow Google API format --)
+//
+// (-- api-linter: core::0134::request-resource-required=disabled
+//
+//	aip.dev/not-precedent: UpdateTaskQueueUserDataRequest RPC doesn't follow Google API format. --)
+type UpdateTaskQueueUserDataRequest struct {
+	NamespaceId string `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue   string `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	// Versioned user data, set if the task queue has user data and the request's last_known_user_data_version is less
+	// than the version cached in the root partition.
+	UserData *v110.VersionedTaskQueueUserData `protobuf:"bytes,3,opt,name=user_data,json=userData,proto3" json:"user_data,omitempty"`
+	// List of added build ids
+	BuildIdsAdded []string `protobuf:"bytes,4,rep,name=build_ids_added,json=buildIdsAdded,proto3" json:"build_ids_added,omitempty"`
+	// List of removed build ids
+	BuildIdsRemoved []string `protobuf:"bytes,5,rep,name=build_ids_removed,json=buildIdsRemoved,proto3" json:"build_ids_removed,omitempty"`
+}
+
+func (m *UpdateTaskQueueUserDataRequest) Reset()      { *m = UpdateTaskQueueUserDataRequest{} }
+func (*UpdateTaskQueueUserDataRequest) ProtoMessage() {}
+func (*UpdateTaskQueueUserDataRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{30}
+}
+func (m *UpdateTaskQueueUserDataRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateTaskQueueUserDataRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateTaskQueueUserDataRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateTaskQueueUserDataRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateTaskQueueUserDataRequest.Merge(m, src)
+}
+func (m *UpdateTaskQueueUserDataRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateTaskQueueUserDataRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateTaskQueueUserDataRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateTaskQueueUserDataRequest proto.InternalMessageInfo
+
+func (m *UpdateTaskQueueUserDataRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *UpdateTaskQueueUserDataRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *UpdateTaskQueueUserDataRequest) GetUserData() *v110.VersionedTaskQueueUserData {
+	if m != nil {
+		return m.UserData
+	}
+	return nil
+}
+
+func (m *UpdateTaskQueueUserDataRequest) GetBuildIdsAdded() []string {
+	if m != nil {
+		return m.BuildIdsAdded
+	}
+	return nil
+}
+
+func (m *UpdateTaskQueueUserDataRequest) GetBuildIdsRemoved() []string {
+	if m != nil {
+		return m.BuildIdsRemoved
+	}
+	return nil
+}
+
+type UpdateTaskQueueUserDataResponse struct {
+}
+
+func (m *UpdateTaskQueueUserDataResponse) Reset()      { *m = UpdateTaskQueueUserDataResponse{} }
+func (*UpdateTaskQueueUserDataResponse) ProtoMessage() {}
+func (*UpdateTaskQueueUserDataResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{31}
+}
+func (m *UpdateTaskQueueUserDataResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *UpdateTaskQueueUserDataResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_UpdateTaskQueueUserDataResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *UpdateTaskQueueUserDataResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_UpdateTaskQueueUserDataResponse.Merge(m, src)
+}
+func (m *UpdateTaskQueueUserDataResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *UpdateTaskQueueUserDataResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_UpdateTaskQueueUserDataResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_UpdateTaskQueueUserDataResponse proto.InternalMessageInfo
+
+type ReplicateTaskQueueUserDataRequest struct {
+	NamespaceId string                  `protobuf:"bytes,1,opt,name=namespace_id,json=namespaceId,proto3" json:"namespace_id,omitempty"`
+	TaskQueue   string                  `protobuf:"bytes,2,opt,name=task_queue,json=taskQueue,proto3" json:"task_queue,omitempty"`
+	UserData    *v110.TaskQueueUserData `protobuf:"bytes,3,opt,name=user_data,json=userData,proto3" json:"user_data,omitempty"`
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) Reset()      { *m = ReplicateTaskQueueUserDataRequest{} }
+func (*ReplicateTaskQueueUserDataRequest) ProtoMessage() {}
+func (*ReplicateTaskQueueUserDataRequest) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{32}
+}
+func (m *ReplicateTaskQueueUserDataRequest) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ReplicateTaskQueueUserDataRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ReplicateTaskQueueUserDataRequest.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ReplicateTaskQueueUserDataRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReplicateTaskQueueUserDataRequest.Merge(m, src)
+}
+func (m *ReplicateTaskQueueUserDataRequest) XXX_Size() int {
+	return m.Size()
+}
+func (m *ReplicateTaskQueueUserDataRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReplicateTaskQueueUserDataRequest.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReplicateTaskQueueUserDataRequest proto.InternalMessageInfo
+
+func (m *ReplicateTaskQueueUserDataRequest) GetNamespaceId() string {
+	if m != nil {
+		return m.NamespaceId
+	}
+	return ""
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) GetTaskQueue() string {
+	if m != nil {
+		return m.TaskQueue
+	}
+	return ""
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) GetUserData() *v110.TaskQueueUserData {
+	if m != nil {
+		return m.UserData
+	}
+	return nil
+}
+
+type ReplicateTaskQueueUserDataResponse struct {
+}
+
+func (m *ReplicateTaskQueueUserDataResponse) Reset()      { *m = ReplicateTaskQueueUserDataResponse{} }
+func (*ReplicateTaskQueueUserDataResponse) ProtoMessage() {}
+func (*ReplicateTaskQueueUserDataResponse) Descriptor() ([]byte, []int) {
+	return fileDescriptor_a429a3813476c583, []int{33}
+}
+func (m *ReplicateTaskQueueUserDataResponse) XXX_Unmarshal(b []byte) error {
+	return m.Unmarshal(b)
+}
+func (m *ReplicateTaskQueueUserDataResponse) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+	if deterministic {
+		return xxx_messageInfo_ReplicateTaskQueueUserDataResponse.Marshal(b, m, deterministic)
+	} else {
+		b = b[:cap(b)]
+		n, err := m.MarshalToSizedBuffer(b)
+		if err != nil {
+			return nil, err
+		}
+		return b[:n], nil
+	}
+}
+func (m *ReplicateTaskQueueUserDataResponse) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_ReplicateTaskQueueUserDataResponse.Merge(m, src)
+}
+func (m *ReplicateTaskQueueUserDataResponse) XXX_Size() int {
+	return m.Size()
+}
+func (m *ReplicateTaskQueueUserDataResponse) XXX_DiscardUnknown() {
+	xxx_messageInfo_ReplicateTaskQueueUserDataResponse.DiscardUnknown(m)
+}
+
+var xxx_messageInfo_ReplicateTaskQueueUserDataResponse proto.InternalMessageInfo
+
 func init() {
 	proto.RegisterType((*PollWorkflowTaskQueueRequest)(nil), "temporal.server.api.matchingservice.v1.PollWorkflowTaskQueueRequest")
 	proto.RegisterType((*PollWorkflowTaskQueueResponse)(nil), "temporal.server.api.matchingservice.v1.PollWorkflowTaskQueueResponse")
@@ -1337,6 +2401,24 @@ func init() {
 	proto.RegisterType((*DescribeTaskQueueResponse)(nil), "temporal.server.api.matchingservice.v1.DescribeTaskQueueResponse")
 	proto.RegisterType((*ListTaskQueuePartitionsRequest)(nil), "temporal.server.api.matchingservice.v1.ListTaskQueuePartitionsRequest")
 	proto.RegisterType((*ListTaskQueuePartitionsResponse)(nil), "temporal.server.api.matchingservice.v1.ListTaskQueuePartitionsResponse")
+	proto.RegisterType((*UpdateWorkerBuildIdCompatibilityRequest)(nil), "temporal.server.api.matchingservice.v1.UpdateWorkerBuildIdCompatibilityRequest")
+	proto.RegisterType((*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest)(nil), "temporal.server.api.matchingservice.v1.UpdateWorkerBuildIdCompatibilityRequest.ApplyPublicRequest")
+	proto.RegisterType((*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds)(nil), "temporal.server.api.matchingservice.v1.UpdateWorkerBuildIdCompatibilityRequest.RemoveBuildIds")
+	proto.RegisterType((*UpdateWorkerBuildIdCompatibilityResponse)(nil), "temporal.server.api.matchingservice.v1.UpdateWorkerBuildIdCompatibilityResponse")
+	proto.RegisterType((*GetWorkerBuildIdCompatibilityRequest)(nil), "temporal.server.api.matchingservice.v1.GetWorkerBuildIdCompatibilityRequest")
+	proto.RegisterType((*GetWorkerBuildIdCompatibilityResponse)(nil), "temporal.server.api.matchingservice.v1.GetWorkerBuildIdCompatibilityResponse")
+	proto.RegisterType((*GetTaskQueueUserDataRequest)(nil), "temporal.server.api.matchingservice.v1.GetTaskQueueUserDataRequest")
+	proto.RegisterType((*GetTaskQueueUserDataResponse)(nil), "temporal.server.api.matchingservice.v1.GetTaskQueueUserDataResponse")
+	proto.RegisterType((*ApplyTaskQueueUserDataReplicationEventRequest)(nil), "temporal.server.api.matchingservice.v1.ApplyTaskQueueUserDataReplicationEventRequest")
+	proto.RegisterType((*ApplyTaskQueueUserDataReplicationEventResponse)(nil), "temporal.server.api.matchingservice.v1.ApplyTaskQueueUserDataReplicationEventResponse")
+	proto.RegisterType((*GetBuildIdTaskQueueMappingRequest)(nil), "temporal.server.api.matchingservice.v1.GetBuildIdTaskQueueMappingRequest")
+	proto.RegisterType((*GetBuildIdTaskQueueMappingResponse)(nil), "temporal.server.api.matchingservice.v1.GetBuildIdTaskQueueMappingResponse")
+	proto.RegisterType((*ForceUnloadTaskQueueRequest)(nil), "temporal.server.api.matchingservice.v1.ForceUnloadTaskQueueRequest")
+	proto.RegisterType((*ForceUnloadTaskQueueResponse)(nil), "temporal.server.api.matchingservice.v1.ForceUnloadTaskQueueResponse")
+	proto.RegisterType((*UpdateTaskQueueUserDataRequest)(nil), "temporal.server.api.matchingservice.v1.UpdateTaskQueueUserDataRequest")
+	proto.RegisterType((*UpdateTaskQueueUserDataResponse)(nil), "temporal.server.api.matchingservice.v1.UpdateTaskQueueUserDataResponse")
+	proto.RegisterType((*ReplicateTaskQueueUserDataRequest)(nil), "temporal.server.api.matchingservice.v1.ReplicateTaskQueueUserDataRequest")
+	proto.RegisterType((*ReplicateTaskQueueUserDataResponse)(nil), "temporal.server.api.matchingservice.v1.ReplicateTaskQueueUserDataResponse")
 }
 
 func init() {
@@ -1344,114 +2426,160 @@ func init() {
 }
 
 var fileDescriptor_a429a3813476c583 = []byte{
-	// 1712 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xcc, 0x18, 0x4f, 0x73, 0xdb, 0x58,
-	0x3d, 0x72, 0x12, 0x27, 0x7e, 0xb2, 0x13, 0x47, 0x0b, 0x59, 0x25, 0x6d, 0x94, 0xd4, 0xbb, 0xec,
-	0x66, 0x99, 0x45, 0x9e, 0x86, 0xd9, 0xce, 0xb6, 0xd0, 0x81, 0x34, 0xcd, 0xb4, 0x86, 0xb6, 0xa4,
-	0x8a, 0x07, 0x98, 0x0e, 0x33, 0xea, 0x8b, 0xf4, 0xe2, 0x88, 0xc8, 0x7a, 0x8e, 0xde, 0x93, 0x53,
-	0x73, 0x62, 0xa6, 0xc3, 0xbd, 0x33, 0x5c, 0x60, 0xf8, 0x02, 0x70, 0x86, 0x0f, 0xc1, 0x81, 0x43,
-	0x8f, 0xbd, 0x41, 0x93, 0x0b, 0x33, 0x5c, 0xca, 0x37, 0x60, 0xde, 0x1f, 0xc9, 0x92, 0x6c, 0x27,
-	0x4e, 0x9a, 0xa1, 0x7b, 0xb3, 0x7e, 0xff, 0xff, 0xff, 0x7e, 0xcf, 0xe0, 0x2e, 0x45, 0xed, 0x0e,
-	0x0e, 0xa1, 0x5f, 0x27, 0x28, 0xec, 0xa2, 0xb0, 0x0e, 0x3b, 0x5e, 0xbd, 0x0d, 0xa9, 0x73, 0xe0,
-	0x05, 0x2d, 0x06, 0xf2, 0x1c, 0x54, 0xef, 0xde, 0xac, 0x87, 0xe8, 0x28, 0x42, 0x84, 0xda, 0x21,
-	0x22, 0x1d, 0x1c, 0x10, 0x64, 0x76, 0x42, 0x4c, 0xb1, 0xf6, 0x59, 0xcc, 0x6e, 0x0a, 0x76, 0x13,
-	0x76, 0x3c, 0x33, 0xc7, 0x6e, 0x76, 0x6f, 0x2e, 0x1b, 0x2d, 0x8c, 0x5b, 0x3e, 0xaa, 0x73, 0xae,
-	0xbd, 0x68, 0xbf, 0xee, 0x46, 0x21, 0xa4, 0x1e, 0x0e, 0x84, 0x9c, 0xe5, 0xd5, 0x3c, 0x9e, 0x7a,
-	0x6d, 0x44, 0x28, 0x6c, 0x77, 0x24, 0xc1, 0x0d, 0x17, 0x75, 0x50, 0xe0, 0xa2, 0xc0, 0xf1, 0x10,
-	0xa9, 0xb7, 0x70, 0x0b, 0x73, 0x38, 0xff, 0x25, 0x49, 0x3e, 0x4d, 0x5c, 0x61, 0x3e, 0x38, 0xb8,
-	0xdd, 0xc6, 0x01, 0x33, 0xbd, 0x8d, 0x08, 0x81, 0x2d, 0x69, 0xf1, 0xf2, 0x67, 0x19, 0x2a, 0x14,
-	0x44, 0x6d, 0xc2, 0x88, 0x28, 0x24, 0x87, 0xf6, 0x51, 0x84, 0xa2, 0x98, 0xee, 0xf3, 0x0c, 0x1d,
-	0x43, 0x73, 0xec, 0xa0, 0xc0, 0x4f, 0x32, 0x84, 0x47, 0x11, 0x0a, 0x7b, 0x83, 0x44, 0x9f, 0x0f,
-	0x0b, 0x73, 0x46, 0xb9, 0x24, 0xfc, 0x72, 0x18, 0xe1, 0x81, 0x47, 0x28, 0x1e, 0x26, 0xf6, 0x56,
-	0x46, 0xf7, 0x31, 0x0e, 0x0f, 0xf7, 0x7d, 0x7c, 0x7c, 0x6e, 0xda, 0x6a, 0xff, 0x51, 0xc0, 0xf5,
-	0x1d, 0xec, 0xfb, 0xbf, 0x90, 0x1c, 0x4d, 0x48, 0x0e, 0x9f, 0x32, 0xf7, 0x2c, 0x41, 0xaf, 0xdd,
-	0x00, 0xe5, 0x00, 0xb6, 0x11, 0xe9, 0x40, 0x07, 0xd9, 0x9e, 0xab, 0x2b, 0x6b, 0xca, 0x7a, 0xc9,
-	0x52, 0x13, 0x58, 0xc3, 0xd5, 0xae, 0x81, 0x52, 0x07, 0xfb, 0x3e, 0x0a, 0x19, 0xbe, 0xc0, 0xf1,
-	0xb3, 0x02, 0xd0, 0x70, 0xb5, 0xe7, 0xa0, 0xcc, 0x7e, 0xdb, 0x52, 0xbf, 0x3e, 0xb9, 0xa6, 0xac,
-	0xab, 0x1b, 0x77, 0xcd, 0xa4, 0x5c, 0x58, 0x9d, 0xe4, 0xec, 0x35, 0xbb, 0x37, 0xcd, 0xb3, 0x8c,
-	0xb2, 0x54, 0x26, 0x32, 0xb6, 0xf0, 0x0b, 0x50, 0xdd, 0xc7, 0xe1, 0x31, 0x0c, 0x5d, 0xe4, 0xda,
-	0x04, 0x47, 0xa1, 0x83, 0xf4, 0x29, 0x6e, 0xc5, 0x7c, 0x02, 0xdf, 0xe5, 0xe0, 0xda, 0xcb, 0x12,
-	0x58, 0x19, 0x21, 0x58, 0x44, 0x45, 0x5b, 0x01, 0x80, 0x17, 0x00, 0xc5, 0x87, 0x28, 0xe0, 0xce,
-	0x96, 0xad, 0x12, 0x83, 0x34, 0x19, 0x40, 0xfb, 0x25, 0xd0, 0x62, 0x5b, 0x6d, 0xf4, 0x02, 0x39,
-	0x11, 0xab, 0x5c, 0xee, 0xb3, 0xba, 0xf1, 0x45, 0xd6, 0x27, 0x51, 0x76, 0xcc, 0x95, 0x58, 0xdb,
-	0x76, 0xcc, 0x60, 0x2d, 0x1c, 0xe7, 0x41, 0x5a, 0x03, 0x54, 0x12, 0xc9, 0xb4, 0xd7, 0x41, 0x32,
-	0x50, 0x9f, 0x9e, 0x27, 0xb4, 0xd9, 0xeb, 0x20, 0xab, 0x7c, 0x9c, 0xfa, 0xd2, 0x6e, 0x83, 0xa5,
-	0x4e, 0x88, 0xba, 0x1e, 0x8e, 0x88, 0x4d, 0x28, 0x0c, 0x29, 0x72, 0x6d, 0xd4, 0x45, 0x01, 0x65,
-	0xf9, 0x61, 0x91, 0x99, 0xb4, 0x16, 0x63, 0x82, 0x5d, 0x81, 0xdf, 0x66, 0xe8, 0x86, 0xab, 0xad,
-	0x83, 0xea, 0x00, 0xc7, 0x34, 0xe7, 0x98, 0x23, 0x59, 0x4a, 0x1d, 0xcc, 0x40, 0xca, 0x6c, 0xa3,
-	0x7a, 0x71, 0x4d, 0x59, 0x9f, 0xb6, 0xe2, 0x4f, 0xad, 0x06, 0x2a, 0x01, 0x7a, 0x41, 0xfb, 0x02,
-	0x66, 0xb8, 0x00, 0x95, 0x01, 0x63, 0xee, 0x2f, 0x81, 0xb6, 0x07, 0x9d, 0x43, 0x1f, 0xb7, 0x6c,
-	0x07, 0x47, 0x01, 0xb5, 0x0f, 0xbc, 0x80, 0xea, 0xb3, 0x9c, 0xb0, 0x2a, 0x31, 0x5b, 0x0c, 0xf1,
-	0xd0, 0x0b, 0xa8, 0xf6, 0x35, 0xd0, 0x09, 0xf5, 0x9c, 0xc3, 0x5e, 0x3f, 0xe6, 0x36, 0x0a, 0xe0,
-	0x9e, 0x8f, 0x5c, 0xbd, 0xb4, 0xa6, 0xac, 0xcf, 0x5a, 0x8b, 0x02, 0x9f, 0x84, 0x73, 0x5b, 0x60,
-	0xb5, 0x3b, 0x60, 0x9a, 0xf7, 0xa1, 0x0e, 0x86, 0x45, 0x93, 0xa3, 0xd2, 0xc1, 0x7c, 0xca, 0x00,
-	0x96, 0x60, 0xd1, 0x5a, 0xa9, 0x5c, 0xf3, 0x9a, 0xf0, 0x82, 0x7d, 0xac, 0xab, 0x5c, 0xd0, 0x6d,
-	0x73, 0xd8, 0xb8, 0x93, 0xdd, 0xc9, 0x24, 0x36, 0x43, 0x18, 0x10, 0x0f, 0x05, 0x34, 0x5d, 0x6a,
-	0x8d, 0x60, 0x1f, 0x5b, 0xd5, 0xe3, 0x1c, 0x44, 0x6b, 0x81, 0x95, 0xc1, 0xa2, 0xb2, 0xfb, 0x73,
-	0x48, 0x2f, 0x0f, 0x33, 0x3e, 0x19, 0x44, 0x5c, 0x5d, 0x52, 0xc8, 0xcb, 0x03, 0xa5, 0x95, 0xe0,
-	0x58, 0x2f, 0xef, 0x85, 0x30, 0x70, 0x0e, 0x64, 0x79, 0xcf, 0xf1, 0xf2, 0x56, 0x05, 0x4c, 0x14,
-	0xf8, 0x03, 0x30, 0x47, 0x9c, 0x03, 0xe4, 0x46, 0x3e, 0x72, 0x6d, 0x36, 0x7a, 0xf5, 0x79, 0xae,
-	0x7c, 0xd9, 0x14, 0x73, 0xd9, 0x8c, 0xe7, 0xb2, 0xd9, 0x8c, 0xe7, 0xf2, 0xbd, 0xa9, 0x57, 0xff,
-	0x5c, 0x55, 0xac, 0x4a, 0xc2, 0xc7, 0x30, 0xda, 0x16, 0x28, 0xc7, 0x95, 0xc4, 0xc5, 0x54, 0xc7,
-	0x14, 0xa3, 0x4a, 0x2e, 0x2e, 0xc4, 0x07, 0x33, 0x2c, 0x17, 0x1e, 0x22, 0xfa, 0xc2, 0xda, 0xe4,
-	0xba, 0xba, 0x61, 0x99, 0xe3, 0xad, 0x19, 0xf3, 0xcc, 0x2e, 0x37, 0x9f, 0x0a, 0xa1, 0xdb, 0x01,
-	0x0d, 0x7b, 0x56, 0xac, 0x62, 0xf9, 0x39, 0x28, 0xa7, 0x11, 0x5a, 0x15, 0x4c, 0x1e, 0xa2, 0x9e,
-	0x9c, 0x78, 0xec, 0x27, 0x2b, 0xa7, 0x2e, 0xf4, 0x23, 0x24, 0x3b, 0x7e, 0xcc, 0x72, 0xe2, 0x2c,
-	0x77, 0x0a, 0x5f, 0x2b, 0x3f, 0x99, 0x9a, 0xad, 0x54, 0xe7, 0x92, 0x99, 0xbb, 0xe9, 0x50, 0xaf,
-	0xeb, 0xd1, 0xde, 0x37, 0x6a, 0xe6, 0x8e, 0x32, 0xea, 0xd2, 0x33, 0xf7, 0x1f, 0xb3, 0x62, 0xe6,
-	0x0e, 0x11, 0xfc, 0xa1, 0x67, 0xee, 0x2a, 0x50, 0xa1, 0xb4, 0x8a, 0x85, 0x71, 0x92, 0x3b, 0x00,
-	0x62, 0x50, 0xc3, 0x65, 0x43, 0x39, 0x21, 0xe0, 0x43, 0x79, 0xea, 0xec, 0xa1, 0x9c, 0xf8, 0xc8,
-	0x87, 0x32, 0x4c, 0x7d, 0x69, 0xb7, 0xc0, 0xb4, 0x17, 0x74, 0x22, 0xca, 0xc7, 0xa9, 0xba, 0xb1,
-	0x36, 0x4a, 0xc4, 0x0e, 0xec, 0xf9, 0x18, 0xba, 0xc4, 0x12, 0xe4, 0x43, 0x1a, 0xb2, 0x78, 0xb9,
-	0x86, 0x7c, 0x06, 0x96, 0x62, 0x80, 0x4d, 0xb1, 0xed, 0xf8, 0x98, 0x20, 0x2e, 0x10, 0x47, 0x94,
-	0x8f, 0x68, 0x75, 0x63, 0x69, 0x40, 0xe6, 0x7d, 0x79, 0x9c, 0xdd, 0x9b, 0xfa, 0x03, 0x13, 0xb9,
-	0x18, 0x4b, 0x68, 0xe2, 0x2d, 0xc6, 0xdf, 0x14, 0xec, 0x03, 0xcd, 0x3e, 0x7b, 0x99, 0x66, 0x6f,
-	0x82, 0x45, 0xfe, 0x39, 0x68, 0x5d, 0x69, 0x3c, 0xeb, 0x3e, 0xe2, 0xec, 0x39, 0xd3, 0x1e, 0x81,
-	0x85, 0x03, 0x04, 0x43, 0xba, 0x87, 0x20, 0x4d, 0x04, 0x82, 0xf1, 0x04, 0x56, 0x13, 0xce, 0x58,
-	0x5a, 0x6a, 0xeb, 0xa9, 0xd9, 0xad, 0x87, 0x80, 0xe1, 0x44, 0x61, 0xc8, 0x56, 0x9e, 0x04, 0xd9,
-	0xb9, 0xbc, 0x95, 0xc7, 0x0c, 0xca, 0x35, 0x29, 0x67, 0x53, 0x88, 0xd9, 0xcd, 0x64, 0xf1, 0x71,
-	0xda, 0x1d, 0x17, 0x51, 0xe8, 0xf9, 0x44, 0xaf, 0x8c, 0x59, 0x52, 0x7d, 0x7f, 0xee, 0x0b, 0xce,
-	0xc1, 0xab, 0x63, 0xee, 0xd2, 0x57, 0xc7, 0xf7, 0x52, 0x6d, 0x9a, 0x4c, 0x2a, 0xbe, 0x3d, 0x4a,
-	0xfd, 0xde, 0x7b, 0x12, 0x23, 0xb4, 0x5b, 0xa0, 0x78, 0x80, 0xa0, 0x8b, 0x42, 0xb9, 0x19, 0x8c,
-	0x51, 0x2a, 0x1f, 0x72, 0x2a, 0x4b, 0x52, 0xd7, 0xfe, 0x3a, 0x09, 0x16, 0x37, 0x5d, 0x37, 0x3d,
-	0xdb, 0x2f, 0x30, 0x36, 0x1f, 0x80, 0xd2, 0x7b, 0x8c, 0x90, 0x3e, 0xaf, 0xb6, 0x25, 0x67, 0x96,
-	0x58, 0xd0, 0x93, 0x17, 0x58, 0xd0, 0x7c, 0xb2, 0x89, 0x7d, 0xbc, 0x0a, 0xd4, 0xa4, 0x25, 0x93,
-	0xd3, 0x0c, 0xc4, 0xa0, 0x86, 0x9b, 0xef, 0x59, 0xd9, 0x1e, 0xb2, 0x88, 0xa7, 0x2f, 0xdc, 0xb3,
-	0xfc, 0xd8, 0x8b, 0x4b, 0x79, 0xd8, 0x08, 0x2f, 0x0e, 0x1d, 0xe1, 0xda, 0x8f, 0x41, 0x51, 0x12,
-	0xb0, 0x39, 0x31, 0xb7, 0xb1, 0x3e, 0x74, 0x0b, 0xf3, 0x47, 0x4c, 0xec, 0xab, 0xe0, 0xb4, 0x24,
-	0x5f, 0x6d, 0x09, 0x7c, 0x3c, 0x90, 0x34, 0x31, 0xfd, 0x6b, 0xa7, 0x22, 0xa1, 0xe9, 0xf5, 0xf0,
-	0x21, 0x12, 0x6a, 0x82, 0x8f, 0x84, 0xad, 0x76, 0x46, 0xa5, 0xd8, 0x09, 0x0b, 0x02, 0xf5, 0x24,
-	0xa5, 0x38, 0x5b, 0x00, 0x53, 0x57, 0x52, 0x00, 0xd3, 0x17, 0x2b, 0x80, 0xe2, 0xd5, 0x17, 0xc0,
-	0xcc, 0x79, 0x05, 0x30, 0xfb, 0x5e, 0x05, 0x90, 0x4d, 0xb2, 0x2c, 0x80, 0xdf, 0x15, 0xc0, 0xb7,
-	0xf8, 0xa5, 0x14, 0xe7, 0xe7, 0x02, 0xe9, 0xcf, 0x66, 0xa1, 0x70, 0xb9, 0x2c, 0x3c, 0x03, 0x15,
-	0x7e, 0xba, 0xe5, 0xee, 0xa5, 0xaf, 0xce, 0xbd, 0x97, 0x86, 0x59, 0x6d, 0x95, 0xb9, 0xac, 0x4b,
-	0x1c, 0x4a, 0x7f, 0x51, 0xc0, 0xb7, 0x73, 0x12, 0xe5, 0x81, 0xb4, 0x05, 0xca, 0xb1, 0x81, 0x24,
-	0xf2, 0x29, 0x0f, 0xc4, 0x38, 0xf3, 0x5e, 0x95, 0xa6, 0x30, 0x26, 0xed, 0xa7, 0x60, 0x2e, 0x16,
-	0xf2, 0x6b, 0xe4, 0x50, 0xe4, 0x9e, 0x73, 0xc4, 0x8a, 0xe3, 0x55, 0xd2, 0x5a, 0x95, 0xa3, 0xf4,
-	0x67, 0xed, 0xf7, 0x05, 0xb0, 0x26, 0xcc, 0x73, 0x39, 0x1d, 0x8b, 0xeb, 0x16, 0x6e, 0x77, 0x7c,
-	0xc4, 0x88, 0xff, 0xcf, 0xf9, 0xfb, 0x18, 0xcc, 0x88, 0xf7, 0x59, 0xdc, 0xae, 0x45, 0xf6, 0xd9,
-	0x70, 0xb5, 0x00, 0x2c, 0x38, 0xb1, 0x51, 0x49, 0x72, 0x45, 0xab, 0x6e, 0x9e, 0x9b, 0xdc, 0xf3,
-	0xdc, 0xb3, 0xaa, 0x4e, 0x0e, 0x52, 0xfb, 0x04, 0xdc, 0x38, 0x83, 0x4b, 0x96, 0xfb, 0x7f, 0x15,
-	0x70, 0x7d, 0x0b, 0x06, 0x0e, 0xf2, 0x7f, 0x16, 0x51, 0x42, 0x61, 0xe0, 0x7a, 0x41, 0x6b, 0x27,
-	0x75, 0x5b, 0x8f, 0x11, 0xb6, 0x47, 0x60, 0xbe, 0x1f, 0x36, 0xb1, 0xb8, 0x0b, 0xbc, 0x31, 0x73,
-	0xb1, 0xcb, 0x74, 0x24, 0x0f, 0x16, 0x5f, 0xdc, 0x15, 0x9a, 0xfe, 0xbc, 0x9a, 0x5d, 0x96, 0x79,
-	0x90, 0x4c, 0x65, 0x1f, 0x24, 0xb5, 0x55, 0xb0, 0x32, 0xc2, 0x65, 0x19, 0x94, 0x3f, 0x29, 0x40,
-	0xbf, 0x8f, 0x88, 0x13, 0x7a, 0x7b, 0xe8, 0x32, 0xcf, 0xa1, 0x5f, 0x81, 0xb2, 0x8b, 0x88, 0x93,
-	0x24, 0xb9, 0x90, 0x7f, 0xa5, 0x8f, 0x48, 0xf2, 0x28, 0x9d, 0x96, 0xca, 0xc4, 0xc5, 0x79, 0xfd,
-	0x9b, 0x02, 0x96, 0x86, 0x50, 0xca, 0xee, 0xfc, 0x11, 0x98, 0x11, 0x8e, 0x12, 0x5d, 0xe1, 0x8f,
-	0xd4, 0xef, 0x9c, 0x11, 0xbb, 0x1d, 0x11, 0x92, 0x60, 0x1f, 0x5b, 0x31, 0x97, 0xf6, 0x73, 0xb0,
-	0x90, 0xca, 0x26, 0xa1, 0x90, 0x46, 0x44, 0x7a, 0xf0, 0xdd, 0x71, 0xd2, 0xb0, 0xcb, 0x39, 0xac,
-	0x79, 0x9a, 0x05, 0xd4, 0x5e, 0x2a, 0xc0, 0x78, 0xe4, 0x11, 0x9a, 0x10, 0xee, 0xc0, 0x90, 0x7a,
-	0x6c, 0x33, 0x90, 0x38, 0xb4, 0xd7, 0x41, 0xa9, 0x7f, 0xab, 0x89, 0xb8, 0xf6, 0x01, 0x57, 0xd2,
-	0x9d, 0xb5, 0x3f, 0x16, 0xc0, 0xea, 0x48, 0x2b, 0x64, 0x08, 0x7f, 0x03, 0x8c, 0xfe, 0x3b, 0xab,
-	0x1f, 0x8a, 0x4e, 0x42, 0x29, 0x23, 0xfb, 0xd5, 0x38, 0xca, 0x13, 0xf9, 0x8f, 0x11, 0x85, 0x2e,
-	0xa4, 0xd0, 0xba, 0x06, 0xf3, 0x6f, 0xcf, 0xbe, 0x0d, 0x4c, 0x77, 0xf6, 0x6f, 0x9e, 0x01, 0xdd,
-	0x85, 0xf7, 0xd2, 0x7d, 0x9c, 0xff, 0x17, 0xa2, 0xaf, 0xfb, 0x5e, 0xf8, 0xfa, 0xad, 0x31, 0xf1,
-	0xe6, 0xad, 0x31, 0xf1, 0xee, 0xad, 0xa1, 0xfc, 0xf6, 0xc4, 0x50, 0xfe, 0x7c, 0x62, 0x28, 0x7f,
-	0x3f, 0x31, 0x94, 0xd7, 0x27, 0x86, 0xf2, 0xaf, 0x13, 0x43, 0xf9, 0xf7, 0x89, 0x31, 0xf1, 0xee,
-	0xc4, 0x50, 0x5e, 0x9d, 0x1a, 0x13, 0xaf, 0x4f, 0x8d, 0x89, 0x37, 0xa7, 0xc6, 0xc4, 0xb3, 0x1f,
-	0xb6, 0x70, 0xdf, 0x16, 0x0f, 0x9f, 0xfd, 0x7f, 0xfd, 0x0f, 0x72, 0xa0, 0xbd, 0x22, 0xbf, 0x13,
-	0xbe, 0xff, 0xbf, 0x00, 0x00, 0x00, 0xff, 0xff, 0xf8, 0x11, 0x60, 0x20, 0xf0, 0x17, 0x00, 0x00,
+	// 2442 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xdc, 0x5a, 0xcf, 0x73, 0x1b, 0x49,
+	0xf5, 0xf7, 0x58, 0xb2, 0x2d, 0x3d, 0xc9, 0xb6, 0x3c, 0xdf, 0x6c, 0x22, 0x3b, 0x8e, 0x6c, 0xcf,
+	0x66, 0x37, 0x4e, 0x2a, 0x2b, 0x7f, 0x63, 0x48, 0x6a, 0xb3, 0x90, 0x5d, 0x1c, 0xc7, 0x1b, 0x7b,
+	0x37, 0x59, 0x9c, 0x89, 0x13, 0xa8, 0x2c, 0xc5, 0x6c, 0x6b, 0xa6, 0x23, 0x0f, 0x1e, 0xcd, 0x4c,
+	0xa6, 0x7b, 0xa4, 0x98, 0x13, 0x67, 0xb8, 0x2c, 0x45, 0x15, 0x05, 0xc5, 0x9d, 0x02, 0xaa, 0x38,
+	0xc1, 0x65, 0xff, 0x00, 0xaa, 0x38, 0x70, 0xc8, 0x71, 0x6f, 0x10, 0xa7, 0x8a, 0xa2, 0x80, 0xc3,
+	0xf2, 0x1f, 0x50, 0xfd, 0x63, 0x66, 0xf4, 0x63, 0x64, 0xc9, 0x8e, 0xc3, 0x52, 0xdc, 0xac, 0xd7,
+	0xef, 0xbd, 0x7e, 0xef, 0xf5, 0xa7, 0x3f, 0xef, 0xb5, 0x64, 0xb8, 0x41, 0x71, 0xc3, 0xf7, 0x02,
+	0xe4, 0xac, 0x10, 0x1c, 0x34, 0x71, 0xb0, 0x82, 0x7c, 0x7b, 0xa5, 0x81, 0xa8, 0xb9, 0x6b, 0xbb,
+	0x75, 0x26, 0xb2, 0x4d, 0xbc, 0xd2, 0xbc, 0xb2, 0x12, 0xe0, 0x27, 0x21, 0x26, 0xd4, 0x08, 0x30,
+	0xf1, 0x3d, 0x97, 0xe0, 0xaa, 0x1f, 0x78, 0xd4, 0x53, 0xdf, 0x8c, 0xcc, 0xab, 0xc2, 0xbc, 0x8a,
+	0x7c, 0xbb, 0xda, 0x65, 0x5e, 0x6d, 0x5e, 0x99, 0xab, 0xd4, 0x3d, 0xaf, 0xee, 0xe0, 0x15, 0x6e,
+	0x55, 0x0b, 0x1f, 0xaf, 0x58, 0x61, 0x80, 0xa8, 0xed, 0xb9, 0xc2, 0xcf, 0xdc, 0x42, 0xf7, 0x3a,
+	0xb5, 0x1b, 0x98, 0x50, 0xd4, 0xf0, 0xa5, 0xc2, 0x92, 0x85, 0x7d, 0xec, 0x5a, 0xd8, 0x35, 0x6d,
+	0x4c, 0x56, 0xea, 0x5e, 0xdd, 0xe3, 0x72, 0xfe, 0x97, 0x54, 0x39, 0x1f, 0xa7, 0xc2, 0x72, 0x30,
+	0xbd, 0x46, 0xc3, 0x73, 0x59, 0xe8, 0x0d, 0x4c, 0x08, 0xaa, 0xcb, 0x88, 0xe7, 0xde, 0xec, 0xd0,
+	0xc2, 0x6e, 0xd8, 0x20, 0x4c, 0x89, 0x22, 0xb2, 0x67, 0x3c, 0x09, 0x71, 0x18, 0xe9, 0x5d, 0xe8,
+	0xd0, 0x63, 0xcb, 0x7c, 0xb5, 0xd7, 0xe1, 0xeb, 0x1d, 0x8a, 0x4f, 0x42, 0x1c, 0xec, 0x0f, 0xda,
+	0x95, 0xcb, 0x4c, 0xcf, 0xe9, 0xd5, 0xbb, 0x94, 0x76, 0x1c, 0xa6, 0xe3, 0x99, 0x7b, 0xbd, 0xba,
+	0x17, 0xd2, 0x74, 0x3b, 0x12, 0x92, 0x8a, 0x97, 0xd3, 0x14, 0x77, 0x6d, 0x42, 0xbd, 0xb4, 0x50,
+	0xbf, 0x9a, 0xa6, 0xed, 0xe3, 0x80, 0xd8, 0x84, 0x62, 0x57, 0xa0, 0x21, 0xa9, 0x16, 0x91, 0x56,
+	0xd5, 0x34, 0xab, 0x43, 0xaa, 0x76, 0xad, 0xa3, 0x20, 0x2d, 0x2f, 0xd8, 0x7b, 0xec, 0x78, 0xad,
+	0x81, 0x80, 0xd3, 0xfe, 0xa1, 0xc0, 0xfc, 0xb6, 0xe7, 0x38, 0xdf, 0x92, 0x16, 0x3b, 0x88, 0xec,
+	0xdd, 0x63, 0x5b, 0xe8, 0x42, 0x5f, 0x5d, 0x82, 0xa2, 0x8b, 0x1a, 0x98, 0xf8, 0xc8, 0xc4, 0x86,
+	0x6d, 0x95, 0x95, 0x45, 0x65, 0x39, 0xaf, 0x17, 0x62, 0xd9, 0x96, 0xa5, 0x9e, 0x85, 0xbc, 0xef,
+	0x39, 0x0e, 0x0e, 0xd8, 0xfa, 0x28, 0x5f, 0xcf, 0x09, 0xc1, 0x96, 0xa5, 0x7e, 0x02, 0x45, 0xf6,
+	0xb7, 0x21, 0xf7, 0x2f, 0x67, 0x16, 0x95, 0xe5, 0xc2, 0xea, 0x8d, 0x38, 0x3f, 0x8e, 0xf0, 0xae,
+	0x78, 0xab, 0xcd, 0x2b, 0xd5, 0xc3, 0x82, 0xd2, 0x0b, 0xcc, 0x65, 0x14, 0xe1, 0x45, 0x28, 0x3d,
+	0xf6, 0x82, 0x16, 0x0a, 0x2c, 0x6c, 0x19, 0xc4, 0x0b, 0x03, 0x13, 0x97, 0xb3, 0x3c, 0x8a, 0xe9,
+	0x58, 0x7e, 0x9f, 0x8b, 0xb5, 0x3f, 0xe5, 0xe1, 0x5c, 0x1f, 0xc7, 0xa2, 0x2a, 0xea, 0x39, 0x00,
+	0x7e, 0x18, 0xd4, 0xdb, 0xc3, 0x2e, 0x4f, 0xb6, 0xa8, 0xe7, 0x99, 0x64, 0x87, 0x09, 0xd4, 0x6f,
+	0x83, 0x1a, 0xc5, 0x6a, 0xe0, 0xa7, 0xd8, 0x0c, 0xd9, 0x9d, 0xe3, 0x39, 0x17, 0x56, 0x2f, 0x76,
+	0xe6, 0x24, 0x2e, 0x0c, 0x4b, 0x25, 0xda, 0x6d, 0x23, 0x32, 0xd0, 0x67, 0x5a, 0xdd, 0x22, 0x75,
+	0x0b, 0x26, 0x63, 0xcf, 0x74, 0xdf, 0xc7, 0xb2, 0x50, 0xe7, 0x07, 0x39, 0xdd, 0xd9, 0xf7, 0xb1,
+	0x5e, 0x6c, 0xb5, 0x7d, 0x52, 0xaf, 0xc3, 0xac, 0x1f, 0xe0, 0xa6, 0xed, 0x85, 0xc4, 0x20, 0x14,
+	0x05, 0x14, 0x5b, 0x06, 0x6e, 0x62, 0x97, 0xb2, 0xf3, 0x61, 0x95, 0xc9, 0xe8, 0xa7, 0x23, 0x85,
+	0xfb, 0x62, 0x7d, 0x83, 0x2d, 0x6f, 0x59, 0xea, 0x32, 0x94, 0x7a, 0x2c, 0xc6, 0xb8, 0xc5, 0x14,
+	0xe9, 0xd4, 0x2c, 0xc3, 0x04, 0xa2, 0x2c, 0x36, 0x5a, 0x1e, 0x5f, 0x54, 0x96, 0xc7, 0xf4, 0xe8,
+	0xa3, 0xaa, 0xc1, 0xa4, 0x8b, 0x9f, 0xd2, 0xc4, 0xc1, 0x04, 0x77, 0x50, 0x60, 0xc2, 0xc8, 0xfa,
+	0x32, 0xa8, 0x35, 0x64, 0xee, 0x39, 0x5e, 0xdd, 0x30, 0xbd, 0xd0, 0xa5, 0xc6, 0xae, 0xed, 0xd2,
+	0x72, 0x8e, 0x2b, 0x96, 0xe4, 0xca, 0x3a, 0x5b, 0xd8, 0xb4, 0x5d, 0xaa, 0xbe, 0x0d, 0x65, 0x42,
+	0x6d, 0x73, 0x6f, 0x3f, 0xa9, 0xb9, 0x81, 0x5d, 0x54, 0x73, 0xb0, 0x55, 0xce, 0x2f, 0x2a, 0xcb,
+	0x39, 0xfd, 0xb4, 0x58, 0x8f, 0xcb, 0xb9, 0x21, 0x56, 0xd5, 0x77, 0x60, 0x8c, 0x33, 0x48, 0x19,
+	0xd2, 0xaa, 0xc9, 0x97, 0xda, 0x8b, 0x79, 0x8f, 0x09, 0x74, 0x61, 0xa2, 0x3e, 0x81, 0x33, 0x34,
+	0x40, 0x2e, 0xb1, 0x59, 0x1a, 0xc9, 0xd9, 0x20, 0xb2, 0x57, 0x2e, 0x70, 0x6f, 0xd7, 0xab, 0x69,
+	0x6c, 0x2d, 0x89, 0x80, 0xb9, 0xdd, 0x89, 0xcc, 0xdb, 0xf1, 0xb6, 0xe5, 0x3e, 0xf6, 0xf4, 0xd7,
+	0x68, 0xda, 0x92, 0x5a, 0x87, 0x73, 0xbd, 0xf0, 0x32, 0x12, 0x76, 0x28, 0x17, 0xd3, 0xd2, 0x88,
+	0x69, 0x81, 0xef, 0x19, 0x43, 0x7a, 0xae, 0x07, 0x64, 0xf1, 0x1a, 0xbb, 0xd5, 0xb5, 0x00, 0xb9,
+	0xe6, 0xae, 0x04, 0xfa, 0x14, 0x07, 0x7a, 0x41, 0xc8, 0x04, 0xd4, 0x6f, 0xc3, 0x14, 0x31, 0x77,
+	0xb1, 0x15, 0x3a, 0xd8, 0x32, 0x58, 0xfb, 0x28, 0x4f, 0xf3, 0xcd, 0xe7, 0xaa, 0xa2, 0xb7, 0x54,
+	0xa3, 0xde, 0x52, 0xdd, 0x89, 0x7a, 0xcb, 0xcd, 0xec, 0xa7, 0x7f, 0x5e, 0x50, 0xf4, 0xc9, 0xd8,
+	0x8e, 0xad, 0xa8, 0xeb, 0x50, 0x8c, 0x30, 0xc5, 0xdd, 0x94, 0x86, 0x74, 0x53, 0x90, 0x56, 0xdc,
+	0x89, 0x03, 0x13, 0xec, 0x54, 0x6c, 0x4c, 0xca, 0x33, 0x8b, 0x99, 0xe5, 0xc2, 0xaa, 0x5e, 0x1d,
+	0xae, 0x55, 0x56, 0x0f, 0xbd, 0xef, 0xd5, 0x7b, 0xc2, 0xe9, 0x86, 0x4b, 0x83, 0x7d, 0x3d, 0xda,
+	0x42, 0xbd, 0x01, 0x39, 0x49, 0xaf, 0xa4, 0xac, 0xf2, 0xed, 0x96, 0x3a, 0x4b, 0x1e, 0x75, 0x1c,
+	0xb6, 0xc1, 0x5d, 0xa1, 0xa9, 0xc7, 0x26, 0x73, 0x9f, 0x40, 0xb1, 0xdd, 0xaf, 0x5a, 0x82, 0xcc,
+	0x1e, 0xde, 0x97, 0xd4, 0xc9, 0xfe, 0x64, 0xb8, 0x6c, 0x22, 0x27, 0xc4, 0x92, 0x3a, 0x86, 0xc4,
+	0x25, 0x37, 0x79, 0x67, 0xf4, 0x6d, 0xe5, 0x83, 0x6c, 0x6e, 0xb2, 0x34, 0x15, 0x93, 0xf7, 0x9a,
+	0x49, 0xed, 0xa6, 0x4d, 0xf7, 0xff, 0xab, 0xc8, 0xbb, 0x5f, 0x50, 0xc7, 0x27, 0xef, 0x9c, 0x20,
+	0xef, 0x14, 0xc7, 0x5f, 0x36, 0x79, 0x2f, 0x40, 0x01, 0xc9, 0xa8, 0x58, 0x19, 0x33, 0x3c, 0x01,
+	0x88, 0x44, 0x5b, 0x16, 0x63, 0xf7, 0x58, 0x81, 0xb3, 0x7b, 0xf6, 0x70, 0x76, 0x8f, 0x73, 0xe4,
+	0xec, 0x8e, 0xda, 0x3e, 0xa9, 0xd7, 0x60, 0xcc, 0x76, 0xfd, 0x90, 0x72, 0x5e, 0x2e, 0xac, 0x2e,
+	0xf6, 0x73, 0xb1, 0x8d, 0xf6, 0x1d, 0x0f, 0x59, 0x44, 0x17, 0xea, 0x29, 0xf7, 0x79, 0xfc, 0x78,
+	0xf7, 0xf9, 0x11, 0xcc, 0x46, 0x02, 0x83, 0x7a, 0x86, 0xe9, 0x78, 0x04, 0x73, 0x87, 0x5e, 0x48,
+	0x39, 0xd7, 0x17, 0x56, 0x67, 0x7b, 0x7c, 0xde, 0x92, 0xf3, 0xe9, 0xcd, 0xec, 0xcf, 0x98, 0xcb,
+	0xd3, 0x91, 0x87, 0x1d, 0x6f, 0x9d, 0xd9, 0xef, 0x08, 0xf3, 0x1e, 0xae, 0xc8, 0x1d, 0x87, 0x2b,
+	0x76, 0xe0, 0x34, 0xff, 0xd8, 0x1b, 0x5d, 0x7e, 0xb8, 0xe8, 0xfe, 0x8f, 0x9b, 0x77, 0x85, 0x76,
+	0x07, 0x66, 0x76, 0x31, 0x0a, 0x68, 0x0d, 0x23, 0x1a, 0x3b, 0x84, 0xe1, 0x1c, 0x96, 0x62, 0xcb,
+	0xc8, 0x5b, 0x5b, 0xfb, 0x2c, 0x74, 0xb6, 0x4f, 0x0c, 0x15, 0x33, 0x0c, 0x02, 0xd6, 0x74, 0xa4,
+	0xc8, 0xe8, 0x3a, 0xb7, 0xe2, 0x90, 0x45, 0x39, 0x2b, 0xfd, 0xac, 0x09, 0x37, 0xf7, 0x3b, 0x4e,
+	0xf1, 0x6e, 0x7b, 0x3a, 0x16, 0xa6, 0xc8, 0x76, 0x48, 0x79, 0x72, 0x48, 0x48, 0x25, 0xf9, 0xdc,
+	0x12, 0x96, 0xbd, 0xe3, 0xcb, 0xd4, 0xb1, 0xc7, 0x97, 0xb7, 0xda, 0xae, 0x69, 0xcc, 0x54, 0xbc,
+	0xf9, 0xe4, 0x93, 0xbb, 0xf7, 0x51, 0xb4, 0xa0, 0x5e, 0x83, 0xf1, 0x5d, 0x8c, 0x2c, 0x1c, 0xc8,
+	0xc6, 0x52, 0xe9, 0xb7, 0xe5, 0x26, 0xd7, 0xd2, 0xa5, 0xb6, 0xf6, 0xd7, 0x2c, 0x9c, 0x5e, 0xb3,
+	0xac, 0xf6, 0xd6, 0x70, 0x04, 0xda, 0xbc, 0x0d, 0xf9, 0x97, 0xa0, 0x90, 0xc4, 0x56, 0x5d, 0x97,
+	0x9c, 0x25, 0xfa, 0x7b, 0xe6, 0x08, 0xfd, 0x9d, 0x33, 0x9b, 0x68, 0xe7, 0x97, 0x41, 0x4d, 0x30,
+	0xd2, 0x35, 0xea, 0x95, 0xe2, 0x95, 0x68, 0xf8, 0xea, 0xba, 0xc0, 0xf2, 0xae, 0x48, 0x44, 0x8f,
+	0x1d, 0xf9, 0x02, 0xf3, 0x11, 0x32, 0xc2, 0x75, 0x1a, 0x9f, 0x8f, 0xa7, 0xf2, 0xb9, 0xfa, 0x0d,
+	0x18, 0x97, 0x0a, 0x8c, 0x34, 0xa6, 0x56, 0x97, 0x53, 0x3b, 0x3a, 0x7f, 0x80, 0x45, 0x89, 0x0b,
+	0x4b, 0x5d, 0xda, 0xa9, 0xef, 0xc1, 0x18, 0x7f, 0xcb, 0xc9, 0x7b, 0x7d, 0x31, 0xd5, 0x01, 0xd7,
+	0x60, 0x0e, 0x1e, 0x62, 0x93, 0x7a, 0xc1, 0x3a, 0xfb, 0xa8, 0x0b, 0x3b, 0xd5, 0x84, 0x99, 0x26,
+	0x7b, 0x89, 0x79, 0xae, 0x61, 0xd9, 0x01, 0x66, 0x34, 0x8b, 0xe5, 0x9d, 0xbe, 0x96, 0xea, 0xac,
+	0xe7, 0x28, 0x1e, 0x0a, 0xf3, 0x5b, 0x91, 0xb5, 0x5e, 0x6a, 0x76, 0x49, 0xb4, 0x59, 0x38, 0xd3,
+	0x83, 0x33, 0xd1, 0xb0, 0xb4, 0x7f, 0x0a, 0x0c, 0xb6, 0x77, 0xb4, 0x2f, 0x1f, 0x83, 0xd9, 0x93,
+	0xc4, 0xe0, 0xd8, 0x71, 0x30, 0x38, 0x7e, 0xf2, 0x18, 0x9c, 0x18, 0x84, 0xc1, 0xdc, 0xff, 0x32,
+	0x06, 0x3f, 0xc8, 0xe6, 0x32, 0xa5, 0xac, 0x44, 0x62, 0x27, 0xda, 0x24, 0x12, 0xff, 0x3e, 0x0a,
+	0xa7, 0xf8, 0x94, 0x19, 0x01, 0xe5, 0x08, 0x38, 0xec, 0x84, 0xcf, 0xe8, 0xf1, 0xe0, 0xf3, 0x08,
+	0x26, 0xf9, 0xd8, 0xdb, 0x35, 0x6b, 0x5e, 0x1d, 0x38, 0x6b, 0xa6, 0x45, 0xad, 0x17, 0xb9, 0xaf,
+	0xa3, 0x0f, 0x99, 0xe9, 0xa7, 0x31, 0x76, 0xc2, 0x8c, 0xf0, 0x6b, 0x05, 0x5e, 0xeb, 0x0a, 0x5b,
+	0x4e, 0xb0, 0xeb, 0x50, 0x8c, 0xaa, 0x40, 0x42, 0x87, 0xf2, 0x6a, 0x0f, 0xd3, 0x90, 0x0b, 0x32,
+	0x5f, 0x66, 0xa4, 0x7e, 0x08, 0x53, 0x91, 0x93, 0xef, 0x61, 0x93, 0x62, 0x6b, 0xc0, 0x2b, 0x43,
+	0xbc, 0x2e, 0xa4, 0xae, 0x3e, 0xf9, 0xa4, 0xfd, 0xa3, 0xf6, 0x93, 0x51, 0x58, 0x14, 0xe1, 0x59,
+	0x5c, 0x8f, 0xa5, 0xb8, 0xee, 0x35, 0x7c, 0x07, 0x33, 0xe5, 0xff, 0x30, 0x48, 0xce, 0xc0, 0x04,
+	0x77, 0x12, 0xcf, 0xd8, 0xe3, 0xec, 0xe3, 0x96, 0xa5, 0xba, 0x30, 0x63, 0x46, 0x41, 0xc5, 0x08,
+	0x12, 0x44, 0xb6, 0x36, 0x10, 0x41, 0x83, 0xd2, 0xd3, 0x4b, 0x66, 0x97, 0x44, 0x7b, 0x1d, 0x96,
+	0x0e, 0xb1, 0x92, 0x77, 0xea, 0x5f, 0x0a, 0xcc, 0xaf, 0x23, 0xd7, 0xc4, 0xce, 0x37, 0x43, 0x4a,
+	0x28, 0x72, 0x2d, 0xdb, 0xad, 0x6f, 0xb7, 0x3d, 0x7e, 0x86, 0x28, 0xdb, 0x1d, 0x98, 0x4e, 0xca,
+	0x26, 0x26, 0xab, 0x51, 0xce, 0x54, 0x5d, 0xb5, 0xeb, 0xa0, 0x28, 0x5e, 0x2c, 0x3e, 0x59, 0x4d,
+	0xd2, 0xf6, 0x8f, 0x27, 0x33, 0x6c, 0x74, 0xbc, 0x18, 0xb3, 0x9d, 0x2f, 0x46, 0x6d, 0x01, 0xce,
+	0xf5, 0x49, 0x59, 0x16, 0xe5, 0x17, 0x0a, 0x94, 0x6f, 0x61, 0x62, 0x06, 0x76, 0x0d, 0x1f, 0xe7,
+	0xbd, 0xfa, 0x1d, 0x28, 0x5a, 0x98, 0x98, 0xf1, 0x21, 0x8f, 0x76, 0x7f, 0x15, 0xd3, 0xe7, 0x90,
+	0xfb, 0xed, 0xa9, 0x17, 0x98, 0xbb, 0xe8, 0x5c, 0x7f, 0xaf, 0xc0, 0x6c, 0x8a, 0xa6, 0xbc, 0x9d,
+	0xef, 0xc1, 0x84, 0x48, 0x94, 0x94, 0x15, 0xfe, 0xad, 0xc0, 0x1b, 0x87, 0xd4, 0x6e, 0x5b, 0x94,
+	0xc4, 0x7d, 0xec, 0xe9, 0x91, 0x95, 0xfa, 0x10, 0x66, 0xda, 0x4e, 0x93, 0x50, 0x44, 0x43, 0x22,
+	0x33, 0xb8, 0x34, 0xcc, 0x31, 0xdc, 0xe7, 0x16, 0xfa, 0x34, 0xed, 0x14, 0x68, 0xbf, 0x54, 0xa0,
+	0x72, 0xc7, 0x26, 0x34, 0x56, 0xdc, 0x46, 0x01, 0xb5, 0x59, 0xab, 0x24, 0x51, 0x69, 0xe7, 0x21,
+	0x9f, 0x0c, 0xd3, 0xa2, 0xae, 0x89, 0xa0, 0xa7, 0xf0, 0x99, 0x57, 0x73, 0x81, 0xb5, 0x9f, 0x8f,
+	0xc2, 0x42, 0xdf, 0x40, 0x65, 0x95, 0xbf, 0x0f, 0x95, 0xe4, 0xad, 0x9c, 0x54, 0xcb, 0x8f, 0x35,
+	0x65, 0xf1, 0xaf, 0x0e, 0xb3, 0x79, 0xec, 0xff, 0x2e, 0xa6, 0xc8, 0x42, 0x14, 0xe9, 0x67, 0x51,
+	0xf7, 0xf7, 0x07, 0x49, 0x0c, 0x6c, 0xef, 0x8e, 0x6f, 0xfa, 0x7a, 0xf7, 0x1e, 0x7d, 0xa9, 0xbd,
+	0x5b, 0xdd, 0x5f, 0x44, 0x25, 0x7b, 0x6b, 0x9f, 0x8d, 0xc1, 0x85, 0x07, 0xbe, 0x85, 0x28, 0x66,
+	0x6d, 0x01, 0x07, 0x37, 0x43, 0xdb, 0xb1, 0xb6, 0x2c, 0xc6, 0x2b, 0x88, 0xda, 0x35, 0xdb, 0xb1,
+	0xe9, 0xfe, 0x11, 0x2e, 0xca, 0xb9, 0x9e, 0xf3, 0xca, 0xb7, 0xdf, 0xe2, 0x9f, 0x2a, 0x70, 0x0a,
+	0xf9, 0xbe, 0xb3, 0x6f, 0xf8, 0x61, 0xcd, 0xb1, 0xcd, 0xae, 0xbe, 0x5b, 0x1b, 0xf6, 0xeb, 0xb5,
+	0x21, 0x23, 0xae, 0xae, 0xb1, 0xbd, 0xb6, 0xf9, 0x56, 0x52, 0xb4, 0x39, 0xa2, 0xab, 0xa8, 0x47,
+	0xaa, 0xfe, 0x50, 0x81, 0x52, 0x80, 0x1b, 0x5e, 0x13, 0x1b, 0x35, 0xe6, 0xcf, 0xb0, 0x2d, 0x22,
+	0xa9, 0xfc, 0xbb, 0x27, 0x1d, 0x94, 0xce, 0xf7, 0x91, 0x1a, 0x64, 0x73, 0x44, 0x9f, 0x0a, 0x3a,
+	0x24, 0xea, 0x75, 0x28, 0xcb, 0x9f, 0x6a, 0x8c, 0xd0, 0xdd, 0x73, 0xbd, 0x96, 0x1b, 0x07, 0xc5,
+	0xa7, 0x82, 0xfc, 0xe6, 0x88, 0xfe, 0x9a, 0xd4, 0x78, 0x20, 0x14, 0xa4, 0xed, 0xdc, 0x53, 0x50,
+	0x7b, 0x73, 0x56, 0x6b, 0x30, 0x11, 0x15, 0x5a, 0xf4, 0xf6, 0xcd, 0x81, 0xcc, 0x35, 0x64, 0x32,
+	0x7a, 0xe4, 0x78, 0xce, 0x82, 0xa9, 0xce, 0xc4, 0xd4, 0xab, 0x70, 0x46, 0x04, 0x1f, 0x12, 0x1c,
+	0x18, 0x0c, 0x8a, 0x86, 0x1c, 0x4a, 0x78, 0x14, 0x19, 0xfd, 0x14, 0x5f, 0x7e, 0x40, 0x70, 0x70,
+	0x0b, 0x51, 0x24, 0x47, 0x18, 0xc6, 0xf4, 0xc9, 0x11, 0x30, 0xe0, 0xe7, 0xf5, 0x5c, 0x4d, 0xfa,
+	0xbc, 0x59, 0x80, 0xbc, 0xe7, 0x63, 0x31, 0x90, 0x6b, 0x97, 0x60, 0x79, 0x70, 0x98, 0xb2, 0x03,
+	0xfc, 0x46, 0x81, 0xf3, 0xb7, 0x31, 0x3d, 0x11, 0x90, 0x1b, 0x49, 0x39, 0x05, 0x23, 0x6d, 0x0c,
+	0x2c, 0xe7, 0x30, 0x5b, 0xc7, 0xb5, 0xd4, 0x7e, 0xa4, 0xc0, 0x1b, 0x03, 0x2c, 0x24, 0x6d, 0xd5,
+	0x20, 0x17, 0xfd, 0xb6, 0x26, 0x8f, 0xf6, 0xfd, 0x97, 0x8d, 0x45, 0x78, 0xd3, 0x63, 0xbf, 0xda,
+	0x8f, 0x47, 0xe1, 0xec, 0x6d, 0x9c, 0xb0, 0x67, 0x74, 0x60, 0x27, 0x47, 0x0b, 0x29, 0xf3, 0xc6,
+	0xd8, 0xf1, 0xe7, 0x8d, 0x77, 0x61, 0xde, 0x41, 0x84, 0x1a, 0xfd, 0xc0, 0x97, 0xe1, 0xe0, 0x2b,
+	0x33, 0x9d, 0x0f, 0xd3, 0x00, 0xa8, 0xc1, 0x64, 0x0b, 0xd9, 0xd4, 0x70, 0x71, 0x8b, 0x1b, 0x72,
+	0x1e, 0xc8, 0xe9, 0x05, 0x26, 0xfc, 0x08, 0xb7, 0x98, 0xaa, 0xf6, 0x3b, 0x05, 0xe6, 0xd3, 0x6b,
+	0x22, 0x0f, 0xe6, 0x1a, 0x94, 0xdb, 0x52, 0xda, 0x45, 0x24, 0x09, 0x84, 0x17, 0x28, 0xa7, 0x9f,
+	0x8a, 0xa3, 0xde, 0x44, 0x24, 0xb2, 0x57, 0x3f, 0x86, 0x7c, 0xa2, 0x28, 0xd0, 0xf5, 0x6e, 0x2a,
+	0x01, 0xb5, 0xfd, 0x98, 0x2b, 0xde, 0x78, 0x3c, 0x78, 0x6c, 0xf5, 0x86, 0x94, 0x0b, 0xe5, 0x5f,
+	0xda, 0x1f, 0x14, 0x78, 0x8b, 0xd3, 0x43, 0x4a, 0xdc, 0xbe, 0x63, 0x9b, 0xfc, 0x5a, 0xf1, 0xc7,
+	0xf2, 0xc9, 0x9d, 0xad, 0xde, 0x9e, 0x50, 0xcf, 0xf3, 0xaa, 0x7f, 0x42, 0x87, 0xe5, 0xf1, 0xff,
+	0x50, 0x1d, 0x36, 0x0d, 0x89, 0x61, 0x04, 0x4b, 0xb7, 0x31, 0x95, 0x80, 0x8f, 0xcd, 0xee, 0x22,
+	0xdf, 0xb7, 0xdd, 0xfa, 0x11, 0x92, 0x9d, 0x85, 0x5c, 0x4c, 0xc5, 0x22, 0xd5, 0x09, 0xc9, 0x4d,
+	0xda, 0x06, 0x68, 0x87, 0x6d, 0x21, 0x71, 0xb1, 0x00, 0x85, 0xb6, 0xdf, 0xdd, 0xf9, 0x50, 0x91,
+	0xd7, 0x21, 0x2e, 0x17, 0xd1, 0x7e, 0xab, 0xc0, 0xd9, 0xf7, 0xbd, 0xc0, 0xc4, 0x0f, 0x5c, 0xf6,
+	0xca, 0x3a, 0xce, 0xb4, 0x7a, 0xf4, 0xdb, 0x96, 0x39, 0xf6, 0x6d, 0xd3, 0x6e, 0xc0, 0x7c, 0x7a,
+	0xb8, 0xc9, 0xcf, 0x23, 0x2d, 0x44, 0x0c, 0xb6, 0x88, 0x2d, 0x09, 0xfd, 0x7c, 0x0b, 0x91, 0x3b,
+	0x5c, 0xc0, 0x5e, 0x7a, 0x15, 0x41, 0xe2, 0xaf, 0x90, 0x5f, 0x3e, 0xee, 0xc5, 0xe0, 0x89, 0x5d,
+	0x2a, 0xf5, 0x4d, 0x98, 0x8e, 0xfb, 0x95, 0x81, 0x2c, 0x96, 0x65, 0x96, 0x9f, 0xea, 0x64, 0xd4,
+	0xb5, 0xd6, 0x98, 0x50, 0xbd, 0x04, 0x33, 0x89, 0x9e, 0xe8, 0xf8, 0xac, 0x9d, 0x33, 0xcd, 0xe9,
+	0x48, 0x53, 0x74, 0x50, 0x4b, 0x5b, 0x82, 0x85, 0xbe, 0x45, 0x91, 0x88, 0xfe, 0x4c, 0x61, 0xaf,
+	0x41, 0x01, 0xf7, 0x57, 0x59, 0xbb, 0x57, 0x71, 0x7f, 0xcf, 0x83, 0x76, 0x58, 0xe8, 0x22, 0xc3,
+	0x9b, 0xc1, 0xb3, 0xe7, 0x95, 0x91, 0xcf, 0x9f, 0x57, 0x46, 0xbe, 0x78, 0x5e, 0x51, 0x7e, 0x70,
+	0x50, 0x51, 0x7e, 0x75, 0x50, 0x51, 0xfe, 0x78, 0x50, 0x51, 0x9e, 0x1d, 0x54, 0x94, 0xbf, 0x1c,
+	0x54, 0x94, 0xbf, 0x1d, 0x54, 0x46, 0xbe, 0x38, 0xa8, 0x28, 0x9f, 0xbe, 0xa8, 0x8c, 0x3c, 0x7b,
+	0x51, 0x19, 0xf9, 0xfc, 0x45, 0x65, 0xe4, 0xd1, 0xd7, 0xeb, 0x5e, 0x12, 0x9e, 0xed, 0x1d, 0xfe,
+	0x1f, 0x51, 0x5f, 0xeb, 0x12, 0xd5, 0xc6, 0xf9, 0xd7, 0x7e, 0x5f, 0xf9, 0x77, 0x00, 0x00, 0x00,
+	0xff, 0xff, 0xa5, 0xff, 0x36, 0x34, 0x52, 0x25, 0x00, 0x00,
 }
 
 func (this *PollWorkflowTaskQueueRequest) Equal(that interface{}) bool {
@@ -1536,7 +2664,7 @@ func (this *PollWorkflowTaskQueueResponse) Equal(that interface{}) bool {
 	if !this.Query.Equal(that1.Query) {
 		return false
 	}
-	if !this.WorkflowTaskInfo.Equal(that1.WorkflowTaskInfo) {
+	if !this.TransientWorkflowTask.Equal(that1.TransientWorkflowTask) {
 		return false
 	}
 	if !this.WorkflowExecutionTaskQueue.Equal(that1.WorkflowExecutionTaskQueue) {
@@ -1564,6 +2692,14 @@ func (this *PollWorkflowTaskQueueResponse) Equal(that interface{}) bool {
 	}
 	for i := range this.Queries {
 		if !this.Queries[i].Equal(that1.Queries[i]) {
+			return false
+		}
+	}
+	if len(this.Messages) != len(that1.Messages) {
+		return false
+	}
+	for i := range this.Messages {
+		if !this.Messages[i].Equal(that1.Messages[i]) {
 			return false
 		}
 	}
@@ -1729,7 +2865,7 @@ func (this *AddWorkflowTaskRequest) Equal(that interface{}) bool {
 	if !this.TaskQueue.Equal(that1.TaskQueue) {
 		return false
 	}
-	if this.ScheduleId != that1.ScheduleId {
+	if this.ScheduledEventId != that1.ScheduledEventId {
 		return false
 	}
 	if this.ScheduleToStartTimeout != nil && that1.ScheduleToStartTimeout != nil {
@@ -1745,6 +2881,12 @@ func (this *AddWorkflowTaskRequest) Equal(that interface{}) bool {
 		return false
 	}
 	if this.Source != that1.Source {
+		return false
+	}
+	if !this.Clock.Equal(that1.Clock) {
+		return false
+	}
+	if !this.VersionDirective.Equal(that1.VersionDirective) {
 		return false
 	}
 	return true
@@ -1795,13 +2937,10 @@ func (this *AddActivityTaskRequest) Equal(that interface{}) bool {
 	if !this.Execution.Equal(that1.Execution) {
 		return false
 	}
-	if this.SourceNamespaceId != that1.SourceNamespaceId {
-		return false
-	}
 	if !this.TaskQueue.Equal(that1.TaskQueue) {
 		return false
 	}
-	if this.ScheduleId != that1.ScheduleId {
+	if this.ScheduledEventId != that1.ScheduledEventId {
 		return false
 	}
 	if this.ScheduleToStartTimeout != nil && that1.ScheduleToStartTimeout != nil {
@@ -1817,6 +2956,12 @@ func (this *AddActivityTaskRequest) Equal(that interface{}) bool {
 		return false
 	}
 	if this.Source != that1.Source {
+		return false
+	}
+	if !this.Clock.Equal(that1.Clock) {
+		return false
+	}
+	if !this.VersionDirective.Equal(that1.VersionDirective) {
 		return false
 	}
 	return true
@@ -1871,6 +3016,9 @@ func (this *QueryWorkflowRequest) Equal(that interface{}) bool {
 		return false
 	}
 	if this.ForwardedSource != that1.ForwardedSource {
+		return false
+	}
+	if !this.VersionDirective.Equal(that1.VersionDirective) {
 		return false
 	}
 	return true
@@ -2091,6 +3239,9 @@ func (this *ListTaskQueuePartitionsRequest) Equal(that interface{}) bool {
 	if this.Namespace != that1.Namespace {
 		return false
 	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
 	if !this.TaskQueue.Equal(that1.TaskQueue) {
 		return false
 	}
@@ -2133,6 +3284,584 @@ func (this *ListTaskQueuePartitionsResponse) Equal(that interface{}) bool {
 	}
 	return true
 }
+func (this *UpdateWorkerBuildIdCompatibilityRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if that1.Operation == nil {
+		if this.Operation != nil {
+			return false
+		}
+	} else if this.Operation == nil {
+		return false
+	} else if !this.Operation.Equal(that1.Operation) {
+		return false
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.ApplyPublicRequest.Equal(that1.ApplyPublicRequest) {
+		return false
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.RemoveBuildIds.Equal(that1.RemoveBuildIds) {
+		return false
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.PersistUnknownBuildId != that1.PersistUnknownBuildId {
+		return false
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.Request.Equal(that1.Request) {
+		return false
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.KnownUserDataVersion != that1.KnownUserDataVersion {
+		return false
+	}
+	if len(this.BuildIds) != len(that1.BuildIds) {
+		return false
+	}
+	for i := range this.BuildIds {
+		if this.BuildIds[i] != that1.BuildIds[i] {
+			return false
+		}
+	}
+	return true
+}
+func (this *UpdateWorkerBuildIdCompatibilityResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateWorkerBuildIdCompatibilityResponse)
+	if !ok {
+		that2, ok := that.(UpdateWorkerBuildIdCompatibilityResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	return true
+}
+func (this *GetWorkerBuildIdCompatibilityRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetWorkerBuildIdCompatibilityRequest)
+	if !ok {
+		that2, ok := that.(GetWorkerBuildIdCompatibilityRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if !this.Request.Equal(that1.Request) {
+		return false
+	}
+	return true
+}
+func (this *GetWorkerBuildIdCompatibilityResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetWorkerBuildIdCompatibilityResponse)
+	if !ok {
+		that2, ok := that.(GetWorkerBuildIdCompatibilityResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if !this.Response.Equal(that1.Response) {
+		return false
+	}
+	return true
+}
+func (this *GetTaskQueueUserDataRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetTaskQueueUserDataRequest)
+	if !ok {
+		that2, ok := that.(GetTaskQueueUserDataRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if this.TaskQueueType != that1.TaskQueueType {
+		return false
+	}
+	if this.LastKnownUserDataVersion != that1.LastKnownUserDataVersion {
+		return false
+	}
+	if this.WaitNewData != that1.WaitNewData {
+		return false
+	}
+	return true
+}
+func (this *GetTaskQueueUserDataResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetTaskQueueUserDataResponse)
+	if !ok {
+		that2, ok := that.(GetTaskQueueUserDataResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.TaskQueueHasUserData != that1.TaskQueueHasUserData {
+		return false
+	}
+	if !this.UserData.Equal(that1.UserData) {
+		return false
+	}
+	return true
+}
+func (this *ApplyTaskQueueUserDataReplicationEventRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ApplyTaskQueueUserDataReplicationEventRequest)
+	if !ok {
+		that2, ok := that.(ApplyTaskQueueUserDataReplicationEventRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if !this.UserData.Equal(that1.UserData) {
+		return false
+	}
+	return true
+}
+func (this *ApplyTaskQueueUserDataReplicationEventResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ApplyTaskQueueUserDataReplicationEventResponse)
+	if !ok {
+		that2, ok := that.(ApplyTaskQueueUserDataReplicationEventResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	return true
+}
+func (this *GetBuildIdTaskQueueMappingRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetBuildIdTaskQueueMappingRequest)
+	if !ok {
+		that2, ok := that.(GetBuildIdTaskQueueMappingRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.BuildId != that1.BuildId {
+		return false
+	}
+	return true
+}
+func (this *GetBuildIdTaskQueueMappingResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*GetBuildIdTaskQueueMappingResponse)
+	if !ok {
+		that2, ok := that.(GetBuildIdTaskQueueMappingResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if len(this.TaskQueues) != len(that1.TaskQueues) {
+		return false
+	}
+	for i := range this.TaskQueues {
+		if this.TaskQueues[i] != that1.TaskQueues[i] {
+			return false
+		}
+	}
+	return true
+}
+func (this *ForceUnloadTaskQueueRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ForceUnloadTaskQueueRequest)
+	if !ok {
+		that2, ok := that.(ForceUnloadTaskQueueRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if this.TaskQueueType != that1.TaskQueueType {
+		return false
+	}
+	return true
+}
+func (this *ForceUnloadTaskQueueResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ForceUnloadTaskQueueResponse)
+	if !ok {
+		that2, ok := that.(ForceUnloadTaskQueueResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.WasLoaded != that1.WasLoaded {
+		return false
+	}
+	return true
+}
+func (this *UpdateTaskQueueUserDataRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateTaskQueueUserDataRequest)
+	if !ok {
+		that2, ok := that.(UpdateTaskQueueUserDataRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if !this.UserData.Equal(that1.UserData) {
+		return false
+	}
+	if len(this.BuildIdsAdded) != len(that1.BuildIdsAdded) {
+		return false
+	}
+	for i := range this.BuildIdsAdded {
+		if this.BuildIdsAdded[i] != that1.BuildIdsAdded[i] {
+			return false
+		}
+	}
+	if len(this.BuildIdsRemoved) != len(that1.BuildIdsRemoved) {
+		return false
+	}
+	for i := range this.BuildIdsRemoved {
+		if this.BuildIdsRemoved[i] != that1.BuildIdsRemoved[i] {
+			return false
+		}
+	}
+	return true
+}
+func (this *UpdateTaskQueueUserDataResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*UpdateTaskQueueUserDataResponse)
+	if !ok {
+		that2, ok := that.(UpdateTaskQueueUserDataResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	return true
+}
+func (this *ReplicateTaskQueueUserDataRequest) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ReplicateTaskQueueUserDataRequest)
+	if !ok {
+		that2, ok := that.(ReplicateTaskQueueUserDataRequest)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	if this.NamespaceId != that1.NamespaceId {
+		return false
+	}
+	if this.TaskQueue != that1.TaskQueue {
+		return false
+	}
+	if !this.UserData.Equal(that1.UserData) {
+		return false
+	}
+	return true
+}
+func (this *ReplicateTaskQueueUserDataResponse) Equal(that interface{}) bool {
+	if that == nil {
+		return this == nil
+	}
+
+	that1, ok := that.(*ReplicateTaskQueueUserDataResponse)
+	if !ok {
+		that2, ok := that.(ReplicateTaskQueueUserDataResponse)
+		if ok {
+			that1 = &that2
+		} else {
+			return false
+		}
+	}
+	if that1 == nil {
+		return this == nil
+	} else if this == nil {
+		return false
+	}
+	return true
+}
 func (this *PollWorkflowTaskQueueRequest) GoString() string {
 	if this == nil {
 		return "nil"
@@ -2152,7 +3881,7 @@ func (this *PollWorkflowTaskQueueResponse) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 20)
+	s := make([]string, 0, 21)
 	s = append(s, "&matchingservice.PollWorkflowTaskQueueResponse{")
 	s = append(s, "TaskToken: "+fmt.Sprintf("%#v", this.TaskToken)+",\n")
 	if this.WorkflowExecution != nil {
@@ -2170,8 +3899,8 @@ func (this *PollWorkflowTaskQueueResponse) GoString() string {
 	if this.Query != nil {
 		s = append(s, "Query: "+fmt.Sprintf("%#v", this.Query)+",\n")
 	}
-	if this.WorkflowTaskInfo != nil {
-		s = append(s, "WorkflowTaskInfo: "+fmt.Sprintf("%#v", this.WorkflowTaskInfo)+",\n")
+	if this.TransientWorkflowTask != nil {
+		s = append(s, "TransientWorkflowTask: "+fmt.Sprintf("%#v", this.TransientWorkflowTask)+",\n")
 	}
 	if this.WorkflowExecutionTaskQueue != nil {
 		s = append(s, "WorkflowExecutionTaskQueue: "+fmt.Sprintf("%#v", this.WorkflowExecutionTaskQueue)+",\n")
@@ -2191,6 +3920,9 @@ func (this *PollWorkflowTaskQueueResponse) GoString() string {
 	mapStringForQueries += "}"
 	if this.Queries != nil {
 		s = append(s, "Queries: "+mapStringForQueries+",\n")
+	}
+	if this.Messages != nil {
+		s = append(s, "Messages: "+fmt.Sprintf("%#v", this.Messages)+",\n")
 	}
 	s = append(s, "}")
 	return strings.Join(s, "")
@@ -2251,7 +3983,7 @@ func (this *AddWorkflowTaskRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 11)
+	s := make([]string, 0, 13)
 	s = append(s, "&matchingservice.AddWorkflowTaskRequest{")
 	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
 	if this.Execution != nil {
@@ -2260,10 +3992,16 @@ func (this *AddWorkflowTaskRequest) GoString() string {
 	if this.TaskQueue != nil {
 		s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
 	}
-	s = append(s, "ScheduleId: "+fmt.Sprintf("%#v", this.ScheduleId)+",\n")
+	s = append(s, "ScheduledEventId: "+fmt.Sprintf("%#v", this.ScheduledEventId)+",\n")
 	s = append(s, "ScheduleToStartTimeout: "+fmt.Sprintf("%#v", this.ScheduleToStartTimeout)+",\n")
 	s = append(s, "ForwardedSource: "+fmt.Sprintf("%#v", this.ForwardedSource)+",\n")
 	s = append(s, "Source: "+fmt.Sprintf("%#v", this.Source)+",\n")
+	if this.Clock != nil {
+		s = append(s, "Clock: "+fmt.Sprintf("%#v", this.Clock)+",\n")
+	}
+	if this.VersionDirective != nil {
+		s = append(s, "VersionDirective: "+fmt.Sprintf("%#v", this.VersionDirective)+",\n")
+	}
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -2280,20 +4018,25 @@ func (this *AddActivityTaskRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 12)
+	s := make([]string, 0, 13)
 	s = append(s, "&matchingservice.AddActivityTaskRequest{")
 	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
 	if this.Execution != nil {
 		s = append(s, "Execution: "+fmt.Sprintf("%#v", this.Execution)+",\n")
 	}
-	s = append(s, "SourceNamespaceId: "+fmt.Sprintf("%#v", this.SourceNamespaceId)+",\n")
 	if this.TaskQueue != nil {
 		s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
 	}
-	s = append(s, "ScheduleId: "+fmt.Sprintf("%#v", this.ScheduleId)+",\n")
+	s = append(s, "ScheduledEventId: "+fmt.Sprintf("%#v", this.ScheduledEventId)+",\n")
 	s = append(s, "ScheduleToStartTimeout: "+fmt.Sprintf("%#v", this.ScheduleToStartTimeout)+",\n")
 	s = append(s, "ForwardedSource: "+fmt.Sprintf("%#v", this.ForwardedSource)+",\n")
 	s = append(s, "Source: "+fmt.Sprintf("%#v", this.Source)+",\n")
+	if this.Clock != nil {
+		s = append(s, "Clock: "+fmt.Sprintf("%#v", this.Clock)+",\n")
+	}
+	if this.VersionDirective != nil {
+		s = append(s, "VersionDirective: "+fmt.Sprintf("%#v", this.VersionDirective)+",\n")
+	}
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -2310,7 +4053,7 @@ func (this *QueryWorkflowRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 8)
+	s := make([]string, 0, 9)
 	s = append(s, "&matchingservice.QueryWorkflowRequest{")
 	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
 	if this.TaskQueue != nil {
@@ -2320,6 +4063,9 @@ func (this *QueryWorkflowRequest) GoString() string {
 		s = append(s, "QueryRequest: "+fmt.Sprintf("%#v", this.QueryRequest)+",\n")
 	}
 	s = append(s, "ForwardedSource: "+fmt.Sprintf("%#v", this.ForwardedSource)+",\n")
+	if this.VersionDirective != nil {
+		s = append(s, "VersionDirective: "+fmt.Sprintf("%#v", this.VersionDirective)+",\n")
+	}
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -2420,9 +4166,10 @@ func (this *ListTaskQueuePartitionsRequest) GoString() string {
 	if this == nil {
 		return "nil"
 	}
-	s := make([]string, 0, 6)
+	s := make([]string, 0, 7)
 	s = append(s, "&matchingservice.ListTaskQueuePartitionsRequest{")
 	s = append(s, "Namespace: "+fmt.Sprintf("%#v", this.Namespace)+",\n")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
 	if this.TaskQueue != nil {
 		s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
 	}
@@ -2441,6 +4188,242 @@ func (this *ListTaskQueuePartitionsResponse) GoString() string {
 	if this.WorkflowTaskQueuePartitions != nil {
 		s = append(s, "WorkflowTaskQueuePartitions: "+fmt.Sprintf("%#v", this.WorkflowTaskQueuePartitions)+",\n")
 	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 9)
+	s = append(s, "&matchingservice.UpdateWorkerBuildIdCompatibilityRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	if this.Operation != nil {
+		s = append(s, "Operation: "+fmt.Sprintf("%#v", this.Operation)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_{` +
+		`ApplyPublicRequest:` + fmt.Sprintf("%#v", this.ApplyPublicRequest) + `}`}, ", ")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&matchingservice.UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_{` +
+		`RemoveBuildIds:` + fmt.Sprintf("%#v", this.RemoveBuildIds) + `}`}, ", ")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&matchingservice.UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId{` +
+		`PersistUnknownBuildId:` + fmt.Sprintf("%#v", this.PersistUnknownBuildId) + `}`}, ", ")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 5)
+	s = append(s, "&matchingservice.UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{")
+	if this.Request != nil {
+		s = append(s, "Request: "+fmt.Sprintf("%#v", this.Request)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&matchingservice.UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds{")
+	s = append(s, "KnownUserDataVersion: "+fmt.Sprintf("%#v", this.KnownUserDataVersion)+",\n")
+	s = append(s, "BuildIds: "+fmt.Sprintf("%#v", this.BuildIds)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateWorkerBuildIdCompatibilityResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 4)
+	s = append(s, "&matchingservice.UpdateWorkerBuildIdCompatibilityResponse{")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetWorkerBuildIdCompatibilityRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&matchingservice.GetWorkerBuildIdCompatibilityRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	if this.Request != nil {
+		s = append(s, "Request: "+fmt.Sprintf("%#v", this.Request)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetWorkerBuildIdCompatibilityResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 5)
+	s = append(s, "&matchingservice.GetWorkerBuildIdCompatibilityResponse{")
+	if this.Response != nil {
+		s = append(s, "Response: "+fmt.Sprintf("%#v", this.Response)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetTaskQueueUserDataRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 9)
+	s = append(s, "&matchingservice.GetTaskQueueUserDataRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	s = append(s, "TaskQueueType: "+fmt.Sprintf("%#v", this.TaskQueueType)+",\n")
+	s = append(s, "LastKnownUserDataVersion: "+fmt.Sprintf("%#v", this.LastKnownUserDataVersion)+",\n")
+	s = append(s, "WaitNewData: "+fmt.Sprintf("%#v", this.WaitNewData)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetTaskQueueUserDataResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&matchingservice.GetTaskQueueUserDataResponse{")
+	s = append(s, "TaskQueueHasUserData: "+fmt.Sprintf("%#v", this.TaskQueueHasUserData)+",\n")
+	if this.UserData != nil {
+		s = append(s, "UserData: "+fmt.Sprintf("%#v", this.UserData)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ApplyTaskQueueUserDataReplicationEventRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 7)
+	s = append(s, "&matchingservice.ApplyTaskQueueUserDataReplicationEventRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	if this.UserData != nil {
+		s = append(s, "UserData: "+fmt.Sprintf("%#v", this.UserData)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ApplyTaskQueueUserDataReplicationEventResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 4)
+	s = append(s, "&matchingservice.ApplyTaskQueueUserDataReplicationEventResponse{")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetBuildIdTaskQueueMappingRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 6)
+	s = append(s, "&matchingservice.GetBuildIdTaskQueueMappingRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "BuildId: "+fmt.Sprintf("%#v", this.BuildId)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *GetBuildIdTaskQueueMappingResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 5)
+	s = append(s, "&matchingservice.GetBuildIdTaskQueueMappingResponse{")
+	s = append(s, "TaskQueues: "+fmt.Sprintf("%#v", this.TaskQueues)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ForceUnloadTaskQueueRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 7)
+	s = append(s, "&matchingservice.ForceUnloadTaskQueueRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	s = append(s, "TaskQueueType: "+fmt.Sprintf("%#v", this.TaskQueueType)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ForceUnloadTaskQueueResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 5)
+	s = append(s, "&matchingservice.ForceUnloadTaskQueueResponse{")
+	s = append(s, "WasLoaded: "+fmt.Sprintf("%#v", this.WasLoaded)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateTaskQueueUserDataRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 9)
+	s = append(s, "&matchingservice.UpdateTaskQueueUserDataRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	if this.UserData != nil {
+		s = append(s, "UserData: "+fmt.Sprintf("%#v", this.UserData)+",\n")
+	}
+	s = append(s, "BuildIdsAdded: "+fmt.Sprintf("%#v", this.BuildIdsAdded)+",\n")
+	s = append(s, "BuildIdsRemoved: "+fmt.Sprintf("%#v", this.BuildIdsRemoved)+",\n")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *UpdateTaskQueueUserDataResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 4)
+	s = append(s, "&matchingservice.UpdateTaskQueueUserDataResponse{")
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ReplicateTaskQueueUserDataRequest) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 7)
+	s = append(s, "&matchingservice.ReplicateTaskQueueUserDataRequest{")
+	s = append(s, "NamespaceId: "+fmt.Sprintf("%#v", this.NamespaceId)+",\n")
+	s = append(s, "TaskQueue: "+fmt.Sprintf("%#v", this.TaskQueue)+",\n")
+	if this.UserData != nil {
+		s = append(s, "UserData: "+fmt.Sprintf("%#v", this.UserData)+",\n")
+	}
+	s = append(s, "}")
+	return strings.Join(s, "")
+}
+func (this *ReplicateTaskQueueUserDataResponse) GoString() string {
+	if this == nil {
+		return "nil"
+	}
+	s := make([]string, 0, 4)
+	s = append(s, "&matchingservice.ReplicateTaskQueueUserDataResponse{")
 	s = append(s, "}")
 	return strings.Join(s, "")
 }
@@ -2528,6 +4511,22 @@ func (m *PollWorkflowTaskQueueResponse) MarshalToSizedBuffer(dAtA []byte) (int, 
 	_ = i
 	var l int
 	_ = l
+	if len(m.Messages) > 0 {
+		for iNdEx := len(m.Messages) - 1; iNdEx >= 0; iNdEx-- {
+			{
+				size, err := m.Messages[iNdEx].MarshalToSizedBuffer(dAtA[:i])
+				if err != nil {
+					return 0, err
+				}
+				i -= size
+				i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+			}
+			i--
+			dAtA[i] = 0x1
+			i--
+			dAtA[i] = 0x92
+		}
+	}
 	if len(m.Queries) > 0 {
 		for k := range m.Queries {
 			v := m.Queries[k]
@@ -2597,9 +4596,9 @@ func (m *PollWorkflowTaskQueueResponse) MarshalToSizedBuffer(dAtA []byte) (int, 
 		i--
 		dAtA[i] = 0x62
 	}
-	if m.WorkflowTaskInfo != nil {
+	if m.TransientWorkflowTask != nil {
 		{
-			size, err := m.WorkflowTaskInfo.MarshalToSizedBuffer(dAtA[:i])
+			size, err := m.TransientWorkflowTask.MarshalToSizedBuffer(dAtA[:i])
 			if err != nil {
 				return 0, err
 			}
@@ -2949,6 +4948,30 @@ func (m *AddWorkflowTaskRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	_ = i
 	var l int
 	_ = l
+	if m.VersionDirective != nil {
+		{
+			size, err := m.VersionDirective.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.Clock != nil {
+		{
+			size, err := m.Clock.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x4a
+	}
 	if m.Source != 0 {
 		i = encodeVarintRequestResponse(dAtA, i, uint64(m.Source))
 		i--
@@ -2962,17 +4985,17 @@ func (m *AddWorkflowTaskRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 		dAtA[i] = 0x32
 	}
 	if m.ScheduleToStartTimeout != nil {
-		n23, err23 := github_com_gogo_protobuf_types.StdDurationMarshalTo(*m.ScheduleToStartTimeout, dAtA[i-github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout):])
-		if err23 != nil {
-			return 0, err23
+		n25, err25 := github_com_gogo_protobuf_types.StdDurationMarshalTo(*m.ScheduleToStartTimeout, dAtA[i-github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout):])
+		if err25 != nil {
+			return 0, err25
 		}
-		i -= n23
-		i = encodeVarintRequestResponse(dAtA, i, uint64(n23))
+		i -= n25
+		i = encodeVarintRequestResponse(dAtA, i, uint64(n25))
 		i--
 		dAtA[i] = 0x2a
 	}
-	if m.ScheduleId != 0 {
-		i = encodeVarintRequestResponse(dAtA, i, uint64(m.ScheduleId))
+	if m.ScheduledEventId != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.ScheduledEventId))
 		i--
 		dAtA[i] = 0x20
 	}
@@ -3053,6 +5076,30 @@ func (m *AddActivityTaskRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 	_ = i
 	var l int
 	_ = l
+	if m.VersionDirective != nil {
+		{
+			size, err := m.VersionDirective.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x52
+	}
+	if m.Clock != nil {
+		{
+			size, err := m.Clock.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x4a
+	}
 	if m.Source != 0 {
 		i = encodeVarintRequestResponse(dAtA, i, uint64(m.Source))
 		i--
@@ -3066,17 +5113,17 @@ func (m *AddActivityTaskRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 		dAtA[i] = 0x3a
 	}
 	if m.ScheduleToStartTimeout != nil {
-		n26, err26 := github_com_gogo_protobuf_types.StdDurationMarshalTo(*m.ScheduleToStartTimeout, dAtA[i-github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout):])
-		if err26 != nil {
-			return 0, err26
+		n30, err30 := github_com_gogo_protobuf_types.StdDurationMarshalTo(*m.ScheduleToStartTimeout, dAtA[i-github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout):])
+		if err30 != nil {
+			return 0, err30
 		}
-		i -= n26
-		i = encodeVarintRequestResponse(dAtA, i, uint64(n26))
+		i -= n30
+		i = encodeVarintRequestResponse(dAtA, i, uint64(n30))
 		i--
 		dAtA[i] = 0x32
 	}
-	if m.ScheduleId != 0 {
-		i = encodeVarintRequestResponse(dAtA, i, uint64(m.ScheduleId))
+	if m.ScheduledEventId != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.ScheduledEventId))
 		i--
 		dAtA[i] = 0x28
 	}
@@ -3091,13 +5138,6 @@ func (m *AddActivityTaskRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) 
 		}
 		i--
 		dAtA[i] = 0x22
-	}
-	if len(m.SourceNamespaceId) > 0 {
-		i -= len(m.SourceNamespaceId)
-		copy(dAtA[i:], m.SourceNamespaceId)
-		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.SourceNamespaceId)))
-		i--
-		dAtA[i] = 0x1a
 	}
 	if m.Execution != nil {
 		{
@@ -3164,6 +5204,18 @@ func (m *QueryWorkflowRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	_ = i
 	var l int
 	_ = l
+	if m.VersionDirective != nil {
+		{
+			size, err := m.VersionDirective.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x2a
+	}
 	if len(m.ForwardedSource) > 0 {
 		i -= len(m.ForwardedSource)
 		copy(dAtA[i:], m.ForwardedSource)
@@ -3524,6 +5576,13 @@ func (m *ListTaskQueuePartitionsRequest) MarshalToSizedBuffer(dAtA []byte) (int,
 	_ = i
 	var l int
 	_ = l
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0x1a
+	}
 	if m.TaskQueue != nil {
 		{
 			size, err := m.TaskQueue.MarshalToSizedBuffer(dAtA[:i])
@@ -3594,6 +5653,760 @@ func (m *ListTaskQueuePartitionsResponse) MarshalToSizedBuffer(dAtA []byte) (int
 			dAtA[i] = 0xa
 		}
 	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Operation != nil {
+		{
+			size := m.Operation.Size()
+			i -= size
+			if _, err := m.Operation.MarshalTo(dAtA[i:]); err != nil {
+				return 0, err
+			}
+		}
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.ApplyPublicRequest != nil {
+		{
+			size, err := m.ApplyPublicRequest.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	return len(dAtA) - i, nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	if m.RemoveBuildIds != nil {
+		{
+			size, err := m.RemoveBuildIds.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x22
+	}
+	return len(dAtA) - i, nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	i -= len(m.PersistUnknownBuildId)
+	copy(dAtA[i:], m.PersistUnknownBuildId)
+	i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.PersistUnknownBuildId)))
+	i--
+	dAtA[i] = 0x2a
+	return len(dAtA) - i, nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Request != nil {
+		{
+			size, err := m.Request.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.BuildIds) > 0 {
+		for iNdEx := len(m.BuildIds) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.BuildIds[iNdEx])
+			copy(dAtA[i:], m.BuildIds[iNdEx])
+			i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.BuildIds[iNdEx])))
+			i--
+			dAtA[i] = 0x12
+		}
+	}
+	if m.KnownUserDataVersion != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.KnownUserDataVersion))
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Request != nil {
+		{
+			size, err := m.Request.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetWorkerBuildIdCompatibilityResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetWorkerBuildIdCompatibilityResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetWorkerBuildIdCompatibilityResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.Response != nil {
+		{
+			size, err := m.Response.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetTaskQueueUserDataRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetTaskQueueUserDataRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetTaskQueueUserDataRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TaskQueueType != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.TaskQueueType))
+		i--
+		dAtA[i] = 0x28
+	}
+	if m.WaitNewData {
+		i--
+		if m.WaitNewData {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x20
+	}
+	if m.LastKnownUserDataVersion != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.LastKnownUserDataVersion))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetTaskQueueUserDataResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetTaskQueueUserDataResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetTaskQueueUserDataResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.UserData != nil {
+		{
+			size, err := m.UserData.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x12
+	}
+	if m.TaskQueueHasUserData {
+		i--
+		if m.TaskQueueHasUserData {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.UserData != nil {
+		{
+			size, err := m.UserData.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.BuildId) > 0 {
+		i -= len(m.BuildId)
+		copy(dAtA[i:], m.BuildId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.BuildId)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *GetBuildIdTaskQueueMappingResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *GetBuildIdTaskQueueMappingResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *GetBuildIdTaskQueueMappingResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.TaskQueues) > 0 {
+		for iNdEx := len(m.TaskQueues) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.TaskQueues[iNdEx])
+			copy(dAtA[i:], m.TaskQueues[iNdEx])
+			i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueues[iNdEx])))
+			i--
+			dAtA[i] = 0xa
+		}
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ForceUnloadTaskQueueRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ForceUnloadTaskQueueRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ForceUnloadTaskQueueRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.TaskQueueType != 0 {
+		i = encodeVarintRequestResponse(dAtA, i, uint64(m.TaskQueueType))
+		i--
+		dAtA[i] = 0x18
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ForceUnloadTaskQueueResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ForceUnloadTaskQueueResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ForceUnloadTaskQueueResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.WasLoaded {
+		i--
+		if m.WasLoaded {
+			dAtA[i] = 1
+		} else {
+			dAtA[i] = 0
+		}
+		i--
+		dAtA[i] = 0x8
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateTaskQueueUserDataRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateTaskQueueUserDataRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateTaskQueueUserDataRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if len(m.BuildIdsRemoved) > 0 {
+		for iNdEx := len(m.BuildIdsRemoved) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.BuildIdsRemoved[iNdEx])
+			copy(dAtA[i:], m.BuildIdsRemoved[iNdEx])
+			i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.BuildIdsRemoved[iNdEx])))
+			i--
+			dAtA[i] = 0x2a
+		}
+	}
+	if len(m.BuildIdsAdded) > 0 {
+		for iNdEx := len(m.BuildIdsAdded) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.BuildIdsAdded[iNdEx])
+			copy(dAtA[i:], m.BuildIdsAdded[iNdEx])
+			i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.BuildIdsAdded[iNdEx])))
+			i--
+			dAtA[i] = 0x22
+		}
+	}
+	if m.UserData != nil {
+		{
+			size, err := m.UserData.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *UpdateTaskQueueUserDataResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *UpdateTaskQueueUserDataResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *UpdateTaskQueueUserDataResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	return len(dAtA) - i, nil
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
+	if m.UserData != nil {
+		{
+			size, err := m.UserData.MarshalToSizedBuffer(dAtA[:i])
+			if err != nil {
+				return 0, err
+			}
+			i -= size
+			i = encodeVarintRequestResponse(dAtA, i, uint64(size))
+		}
+		i--
+		dAtA[i] = 0x1a
+	}
+	if len(m.TaskQueue) > 0 {
+		i -= len(m.TaskQueue)
+		copy(dAtA[i:], m.TaskQueue)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.TaskQueue)))
+		i--
+		dAtA[i] = 0x12
+	}
+	if len(m.NamespaceId) > 0 {
+		i -= len(m.NamespaceId)
+		copy(dAtA[i:], m.NamespaceId)
+		i = encodeVarintRequestResponse(dAtA, i, uint64(len(m.NamespaceId)))
+		i--
+		dAtA[i] = 0xa
+	}
+	return len(dAtA) - i, nil
+}
+
+func (m *ReplicateTaskQueueUserDataResponse) Marshal() (dAtA []byte, err error) {
+	size := m.Size()
+	dAtA = make([]byte, size)
+	n, err := m.MarshalToSizedBuffer(dAtA[:size])
+	if err != nil {
+		return nil, err
+	}
+	return dAtA[:n], nil
+}
+
+func (m *ReplicateTaskQueueUserDataResponse) MarshalTo(dAtA []byte) (int, error) {
+	size := m.Size()
+	return m.MarshalToSizedBuffer(dAtA[:size])
+}
+
+func (m *ReplicateTaskQueueUserDataResponse) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+	i := len(dAtA)
+	_ = i
+	var l int
+	_ = l
 	return len(dAtA) - i, nil
 }
 
@@ -3673,8 +6486,8 @@ func (m *PollWorkflowTaskQueueResponse) Size() (n int) {
 		l = m.Query.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
-	if m.WorkflowTaskInfo != nil {
-		l = m.WorkflowTaskInfo.Size()
+	if m.TransientWorkflowTask != nil {
+		l = m.TransientWorkflowTask.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
 	if m.WorkflowExecutionTaskQueue != nil {
@@ -3704,6 +6517,12 @@ func (m *PollWorkflowTaskQueueResponse) Size() (n int) {
 			}
 			mapEntrySize := 1 + len(k) + sovRequestResponse(uint64(len(k))) + l
 			n += mapEntrySize + 2 + sovRequestResponse(uint64(mapEntrySize))
+		}
+	}
+	if len(m.Messages) > 0 {
+		for _, e := range m.Messages {
+			l = e.Size()
+			n += 2 + l + sovRequestResponse(uint64(l))
 		}
 	}
 	return n
@@ -3824,8 +6643,8 @@ func (m *AddWorkflowTaskRequest) Size() (n int) {
 		l = m.TaskQueue.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
-	if m.ScheduleId != 0 {
-		n += 1 + sovRequestResponse(uint64(m.ScheduleId))
+	if m.ScheduledEventId != 0 {
+		n += 1 + sovRequestResponse(uint64(m.ScheduledEventId))
 	}
 	if m.ScheduleToStartTimeout != nil {
 		l = github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout)
@@ -3837,6 +6656,14 @@ func (m *AddWorkflowTaskRequest) Size() (n int) {
 	}
 	if m.Source != 0 {
 		n += 1 + sovRequestResponse(uint64(m.Source))
+	}
+	if m.Clock != nil {
+		l = m.Clock.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.VersionDirective != nil {
+		l = m.VersionDirective.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
 	}
 	return n
 }
@@ -3864,16 +6691,12 @@ func (m *AddActivityTaskRequest) Size() (n int) {
 		l = m.Execution.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
-	l = len(m.SourceNamespaceId)
-	if l > 0 {
-		n += 1 + l + sovRequestResponse(uint64(l))
-	}
 	if m.TaskQueue != nil {
 		l = m.TaskQueue.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
-	if m.ScheduleId != 0 {
-		n += 1 + sovRequestResponse(uint64(m.ScheduleId))
+	if m.ScheduledEventId != 0 {
+		n += 1 + sovRequestResponse(uint64(m.ScheduledEventId))
 	}
 	if m.ScheduleToStartTimeout != nil {
 		l = github_com_gogo_protobuf_types.SizeOfStdDuration(*m.ScheduleToStartTimeout)
@@ -3885,6 +6708,14 @@ func (m *AddActivityTaskRequest) Size() (n int) {
 	}
 	if m.Source != 0 {
 		n += 1 + sovRequestResponse(uint64(m.Source))
+	}
+	if m.Clock != nil {
+		l = m.Clock.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.VersionDirective != nil {
+		l = m.VersionDirective.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
 	}
 	return n
 }
@@ -3918,6 +6749,10 @@ func (m *QueryWorkflowRequest) Size() (n int) {
 	}
 	l = len(m.ForwardedSource)
 	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.VersionDirective != nil {
+		l = m.VersionDirective.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
 	return n
@@ -4057,6 +6892,10 @@ func (m *ListTaskQueuePartitionsRequest) Size() (n int) {
 		l = m.TaskQueue.Size()
 		n += 1 + l + sovRequestResponse(uint64(l))
 	}
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
 	return n
 }
 
@@ -4078,6 +6917,338 @@ func (m *ListTaskQueuePartitionsResponse) Size() (n int) {
 			n += 1 + l + sovRequestResponse(uint64(l))
 		}
 	}
+	return n
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.Operation != nil {
+		n += m.Operation.Size()
+	}
+	return n
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.ApplyPublicRequest != nil {
+		l = m.ApplyPublicRequest.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.RemoveBuildIds != nil {
+		l = m.RemoveBuildIds.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.PersistUnknownBuildId)
+	n += 1 + l + sovRequestResponse(uint64(l))
+	return n
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Request != nil {
+		l = m.Request.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.KnownUserDataVersion != 0 {
+		n += 1 + sovRequestResponse(uint64(m.KnownUserDataVersion))
+	}
+	if len(m.BuildIds) > 0 {
+		for _, s := range m.BuildIds {
+			l = len(s)
+			n += 1 + l + sovRequestResponse(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *UpdateWorkerBuildIdCompatibilityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *GetWorkerBuildIdCompatibilityRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.Request != nil {
+		l = m.Request.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *GetWorkerBuildIdCompatibilityResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.Response != nil {
+		l = m.Response.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *GetTaskQueueUserDataRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.LastKnownUserDataVersion != 0 {
+		n += 1 + sovRequestResponse(uint64(m.LastKnownUserDataVersion))
+	}
+	if m.WaitNewData {
+		n += 2
+	}
+	if m.TaskQueueType != 0 {
+		n += 1 + sovRequestResponse(uint64(m.TaskQueueType))
+	}
+	return n
+}
+
+func (m *GetTaskQueueUserDataResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.TaskQueueHasUserData {
+		n += 2
+	}
+	if m.UserData != nil {
+		l = m.UserData.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.UserData != nil {
+		l = m.UserData.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *GetBuildIdTaskQueueMappingRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.BuildId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *GetBuildIdTaskQueueMappingResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if len(m.TaskQueues) > 0 {
+		for _, s := range m.TaskQueues {
+			l = len(s)
+			n += 1 + l + sovRequestResponse(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *ForceUnloadTaskQueueRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.TaskQueueType != 0 {
+		n += 1 + sovRequestResponse(uint64(m.TaskQueueType))
+	}
+	return n
+}
+
+func (m *ForceUnloadTaskQueueResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	if m.WasLoaded {
+		n += 2
+	}
+	return n
+}
+
+func (m *UpdateTaskQueueUserDataRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.UserData != nil {
+		l = m.UserData.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if len(m.BuildIdsAdded) > 0 {
+		for _, s := range m.BuildIdsAdded {
+			l = len(s)
+			n += 1 + l + sovRequestResponse(uint64(l))
+		}
+	}
+	if len(m.BuildIdsRemoved) > 0 {
+		for _, s := range m.BuildIdsRemoved {
+			l = len(s)
+			n += 1 + l + sovRequestResponse(uint64(l))
+		}
+	}
+	return n
+}
+
+func (m *UpdateTaskQueueUserDataResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	return n
+}
+
+func (m *ReplicateTaskQueueUserDataRequest) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
+	l = len(m.NamespaceId)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	l = len(m.TaskQueue)
+	if l > 0 {
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	if m.UserData != nil {
+		l = m.UserData.Size()
+		n += 1 + l + sovRequestResponse(uint64(l))
+	}
+	return n
+}
+
+func (m *ReplicateTaskQueueUserDataResponse) Size() (n int) {
+	if m == nil {
+		return 0
+	}
+	var l int
+	_ = l
 	return n
 }
 
@@ -4104,6 +7275,11 @@ func (this *PollWorkflowTaskQueueResponse) String() string {
 	if this == nil {
 		return "nil"
 	}
+	repeatedStringForMessages := "[]*Message{"
+	for _, f := range this.Messages {
+		repeatedStringForMessages += strings.Replace(fmt.Sprintf("%v", f), "Message", "v15.Message", 1) + ","
+	}
+	repeatedStringForMessages += "}"
 	keysForQueries := make([]string, 0, len(this.Queries))
 	for k, _ := range this.Queries {
 		keysForQueries = append(keysForQueries, k)
@@ -4125,12 +7301,13 @@ func (this *PollWorkflowTaskQueueResponse) String() string {
 		`BacklogCountHint:` + fmt.Sprintf("%v", this.BacklogCountHint) + `,`,
 		`StickyExecutionEnabled:` + fmt.Sprintf("%v", this.StickyExecutionEnabled) + `,`,
 		`Query:` + strings.Replace(fmt.Sprintf("%v", this.Query), "WorkflowQuery", "v12.WorkflowQuery", 1) + `,`,
-		`WorkflowTaskInfo:` + strings.Replace(fmt.Sprintf("%v", this.WorkflowTaskInfo), "TransientWorkflowTaskInfo", "v13.TransientWorkflowTaskInfo", 1) + `,`,
+		`TransientWorkflowTask:` + strings.Replace(fmt.Sprintf("%v", this.TransientWorkflowTask), "TransientWorkflowTaskInfo", "v13.TransientWorkflowTaskInfo", 1) + `,`,
 		`WorkflowExecutionTaskQueue:` + strings.Replace(fmt.Sprintf("%v", this.WorkflowExecutionTaskQueue), "TaskQueue", "v14.TaskQueue", 1) + `,`,
 		`BranchToken:` + fmt.Sprintf("%v", this.BranchToken) + `,`,
 		`ScheduledTime:` + strings.Replace(fmt.Sprintf("%v", this.ScheduledTime), "Timestamp", "types.Timestamp", 1) + `,`,
 		`StartedTime:` + strings.Replace(fmt.Sprintf("%v", this.StartedTime), "Timestamp", "types.Timestamp", 1) + `,`,
 		`Queries:` + mapStringForQueries + `,`,
+		`Messages:` + repeatedStringForMessages + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4181,10 +7358,12 @@ func (this *AddWorkflowTaskRequest) String() string {
 		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
 		`Execution:` + strings.Replace(fmt.Sprintf("%v", this.Execution), "WorkflowExecution", "v11.WorkflowExecution", 1) + `,`,
 		`TaskQueue:` + strings.Replace(fmt.Sprintf("%v", this.TaskQueue), "TaskQueue", "v14.TaskQueue", 1) + `,`,
-		`ScheduleId:` + fmt.Sprintf("%v", this.ScheduleId) + `,`,
+		`ScheduledEventId:` + fmt.Sprintf("%v", this.ScheduledEventId) + `,`,
 		`ScheduleToStartTimeout:` + strings.Replace(fmt.Sprintf("%v", this.ScheduleToStartTimeout), "Duration", "types.Duration", 1) + `,`,
 		`ForwardedSource:` + fmt.Sprintf("%v", this.ForwardedSource) + `,`,
 		`Source:` + fmt.Sprintf("%v", this.Source) + `,`,
+		`Clock:` + strings.Replace(fmt.Sprintf("%v", this.Clock), "VectorClock", "v17.VectorClock", 1) + `,`,
+		`VersionDirective:` + strings.Replace(fmt.Sprintf("%v", this.VersionDirective), "TaskVersionDirective", "v18.TaskVersionDirective", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4205,12 +7384,13 @@ func (this *AddActivityTaskRequest) String() string {
 	s := strings.Join([]string{`&AddActivityTaskRequest{`,
 		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
 		`Execution:` + strings.Replace(fmt.Sprintf("%v", this.Execution), "WorkflowExecution", "v11.WorkflowExecution", 1) + `,`,
-		`SourceNamespaceId:` + fmt.Sprintf("%v", this.SourceNamespaceId) + `,`,
 		`TaskQueue:` + strings.Replace(fmt.Sprintf("%v", this.TaskQueue), "TaskQueue", "v14.TaskQueue", 1) + `,`,
-		`ScheduleId:` + fmt.Sprintf("%v", this.ScheduleId) + `,`,
+		`ScheduledEventId:` + fmt.Sprintf("%v", this.ScheduledEventId) + `,`,
 		`ScheduleToStartTimeout:` + strings.Replace(fmt.Sprintf("%v", this.ScheduleToStartTimeout), "Duration", "types.Duration", 1) + `,`,
 		`ForwardedSource:` + fmt.Sprintf("%v", this.ForwardedSource) + `,`,
 		`Source:` + fmt.Sprintf("%v", this.Source) + `,`,
+		`Clock:` + strings.Replace(fmt.Sprintf("%v", this.Clock), "VectorClock", "v17.VectorClock", 1) + `,`,
+		`VersionDirective:` + strings.Replace(fmt.Sprintf("%v", this.VersionDirective), "TaskVersionDirective", "v18.TaskVersionDirective", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4233,6 +7413,7 @@ func (this *QueryWorkflowRequest) String() string {
 		`TaskQueue:` + strings.Replace(fmt.Sprintf("%v", this.TaskQueue), "TaskQueue", "v14.TaskQueue", 1) + `,`,
 		`QueryRequest:` + strings.Replace(fmt.Sprintf("%v", this.QueryRequest), "QueryWorkflowRequest", "v1.QueryWorkflowRequest", 1) + `,`,
 		`ForwardedSource:` + fmt.Sprintf("%v", this.ForwardedSource) + `,`,
+		`VersionDirective:` + strings.Replace(fmt.Sprintf("%v", this.VersionDirective), "TaskVersionDirective", "v18.TaskVersionDirective", 1) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4326,6 +7507,7 @@ func (this *ListTaskQueuePartitionsRequest) String() string {
 	s := strings.Join([]string{`&ListTaskQueuePartitionsRequest{`,
 		`Namespace:` + fmt.Sprintf("%v", this.Namespace) + `,`,
 		`TaskQueue:` + strings.Replace(fmt.Sprintf("%v", this.TaskQueue), "TaskQueue", "v14.TaskQueue", 1) + `,`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
 		`}`,
 	}, "")
 	return s
@@ -4347,6 +7529,232 @@ func (this *ListTaskQueuePartitionsResponse) String() string {
 	s := strings.Join([]string{`&ListTaskQueuePartitionsResponse{`,
 		`ActivityTaskQueuePartitions:` + repeatedStringForActivityTaskQueuePartitions + `,`,
 		`WorkflowTaskQueuePartitions:` + repeatedStringForWorkflowTaskQueuePartitions + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`Operation:` + fmt.Sprintf("%v", this.Operation) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_{`,
+		`ApplyPublicRequest:` + strings.Replace(fmt.Sprintf("%v", this.ApplyPublicRequest), "UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest", "UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_{`,
+		`RemoveBuildIds:` + strings.Replace(fmt.Sprintf("%v", this.RemoveBuildIds), "UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds", "UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId{`,
+		`PersistUnknownBuildId:` + fmt.Sprintf("%v", this.PersistUnknownBuildId) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{`,
+		`Request:` + strings.Replace(fmt.Sprintf("%v", this.Request), "UpdateWorkerBuildIdCompatibilityRequest", "v1.UpdateWorkerBuildIdCompatibilityRequest", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds{`,
+		`KnownUserDataVersion:` + fmt.Sprintf("%v", this.KnownUserDataVersion) + `,`,
+		`BuildIds:` + fmt.Sprintf("%v", this.BuildIds) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateWorkerBuildIdCompatibilityResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateWorkerBuildIdCompatibilityResponse{`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetWorkerBuildIdCompatibilityRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetWorkerBuildIdCompatibilityRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`Request:` + strings.Replace(fmt.Sprintf("%v", this.Request), "GetWorkerBuildIdCompatibilityRequest", "v1.GetWorkerBuildIdCompatibilityRequest", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetWorkerBuildIdCompatibilityResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetWorkerBuildIdCompatibilityResponse{`,
+		`Response:` + strings.Replace(fmt.Sprintf("%v", this.Response), "GetWorkerBuildIdCompatibilityResponse", "v1.GetWorkerBuildIdCompatibilityResponse", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetTaskQueueUserDataRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetTaskQueueUserDataRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`LastKnownUserDataVersion:` + fmt.Sprintf("%v", this.LastKnownUserDataVersion) + `,`,
+		`WaitNewData:` + fmt.Sprintf("%v", this.WaitNewData) + `,`,
+		`TaskQueueType:` + fmt.Sprintf("%v", this.TaskQueueType) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetTaskQueueUserDataResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetTaskQueueUserDataResponse{`,
+		`TaskQueueHasUserData:` + fmt.Sprintf("%v", this.TaskQueueHasUserData) + `,`,
+		`UserData:` + strings.Replace(fmt.Sprintf("%v", this.UserData), "VersionedTaskQueueUserData", "v110.VersionedTaskQueueUserData", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ApplyTaskQueueUserDataReplicationEventRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ApplyTaskQueueUserDataReplicationEventRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`UserData:` + strings.Replace(fmt.Sprintf("%v", this.UserData), "TaskQueueUserData", "v110.TaskQueueUserData", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ApplyTaskQueueUserDataReplicationEventResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ApplyTaskQueueUserDataReplicationEventResponse{`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetBuildIdTaskQueueMappingRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetBuildIdTaskQueueMappingRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`BuildId:` + fmt.Sprintf("%v", this.BuildId) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *GetBuildIdTaskQueueMappingResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&GetBuildIdTaskQueueMappingResponse{`,
+		`TaskQueues:` + fmt.Sprintf("%v", this.TaskQueues) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ForceUnloadTaskQueueRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ForceUnloadTaskQueueRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`TaskQueueType:` + fmt.Sprintf("%v", this.TaskQueueType) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ForceUnloadTaskQueueResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ForceUnloadTaskQueueResponse{`,
+		`WasLoaded:` + fmt.Sprintf("%v", this.WasLoaded) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateTaskQueueUserDataRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateTaskQueueUserDataRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`UserData:` + strings.Replace(fmt.Sprintf("%v", this.UserData), "VersionedTaskQueueUserData", "v110.VersionedTaskQueueUserData", 1) + `,`,
+		`BuildIdsAdded:` + fmt.Sprintf("%v", this.BuildIdsAdded) + `,`,
+		`BuildIdsRemoved:` + fmt.Sprintf("%v", this.BuildIdsRemoved) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *UpdateTaskQueueUserDataResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&UpdateTaskQueueUserDataResponse{`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ReplicateTaskQueueUserDataRequest) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ReplicateTaskQueueUserDataRequest{`,
+		`NamespaceId:` + fmt.Sprintf("%v", this.NamespaceId) + `,`,
+		`TaskQueue:` + fmt.Sprintf("%v", this.TaskQueue) + `,`,
+		`UserData:` + strings.Replace(fmt.Sprintf("%v", this.UserData), "TaskQueueUserData", "v110.TaskQueueUserData", 1) + `,`,
+		`}`,
+	}, "")
+	return s
+}
+func (this *ReplicateTaskQueueUserDataResponse) String() string {
+	if this == nil {
+		return "nil"
+	}
+	s := strings.Join([]string{`&ReplicateTaskQueueUserDataResponse{`,
 		`}`,
 	}, "")
 	return s
@@ -4832,7 +8240,7 @@ func (m *PollWorkflowTaskQueueResponse) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 11:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field WorkflowTaskInfo", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field TransientWorkflowTask", wireType)
 			}
 			var msglen int
 			for shift := uint(0); ; shift += 7 {
@@ -4859,10 +8267,10 @@ func (m *PollWorkflowTaskQueueResponse) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			if m.WorkflowTaskInfo == nil {
-				m.WorkflowTaskInfo = &v13.TransientWorkflowTaskInfo{}
+			if m.TransientWorkflowTask == nil {
+				m.TransientWorkflowTask = &v13.TransientWorkflowTaskInfo{}
 			}
-			if err := m.WorkflowTaskInfo.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+			if err := m.TransientWorkflowTask.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
 				return err
 			}
 			iNdEx = postIndex
@@ -5136,6 +8544,40 @@ func (m *PollWorkflowTaskQueueResponse) Unmarshal(dAtA []byte) error {
 				}
 			}
 			m.Queries[mapkey] = mapvalue
+			iNdEx = postIndex
+		case 18:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Messages", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Messages = append(m.Messages, &v15.Message{})
+			if err := m.Messages[len(m.Messages)-1].Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -6083,9 +9525,9 @@ func (m *AddWorkflowTaskRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 4:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ScheduleId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ScheduledEventId", wireType)
 			}
-			m.ScheduleId = 0
+			m.ScheduledEventId = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowRequestResponse
@@ -6095,7 +9537,7 @@ func (m *AddWorkflowTaskRequest) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.ScheduleId |= int64(b&0x7F) << shift
+				m.ScheduledEventId |= int64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -6182,11 +9624,83 @@ func (m *AddWorkflowTaskRequest) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Source |= v15.TaskSource(b&0x7F) << shift
+				m.Source |= v16.TaskSource(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Clock", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Clock == nil {
+				m.Clock = &v17.VectorClock{}
+			}
+			if err := m.Clock.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field VersionDirective", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.VersionDirective == nil {
+				m.VersionDirective = &v18.TaskVersionDirective{}
+			}
+			if err := m.VersionDirective.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRequestResponse(dAtA[iNdEx:])
@@ -6361,38 +9875,6 @@ func (m *AddActivityTaskRequest) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
-		case 3:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field SourceNamespaceId", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowRequestResponse
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthRequestResponse
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthRequestResponse
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.SourceNamespaceId = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
 				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
@@ -6431,9 +9913,9 @@ func (m *AddActivityTaskRequest) Unmarshal(dAtA []byte) error {
 			iNdEx = postIndex
 		case 5:
 			if wireType != 0 {
-				return fmt.Errorf("proto: wrong wireType = %d for field ScheduleId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field ScheduledEventId", wireType)
 			}
-			m.ScheduleId = 0
+			m.ScheduledEventId = 0
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowRequestResponse
@@ -6443,7 +9925,7 @@ func (m *AddActivityTaskRequest) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.ScheduleId |= int64(b&0x7F) << shift
+				m.ScheduledEventId |= int64(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -6530,11 +10012,83 @@ func (m *AddActivityTaskRequest) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.Source |= v15.TaskSource(b&0x7F) << shift
+				m.Source |= v16.TaskSource(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
+		case 9:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Clock", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Clock == nil {
+				m.Clock = &v17.VectorClock{}
+			}
+			if err := m.Clock.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 10:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field VersionDirective", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.VersionDirective == nil {
+				m.VersionDirective = &v18.TaskVersionDirective{}
+			}
+			if err := m.VersionDirective.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRequestResponse(dAtA[iNdEx:])
@@ -6776,6 +10330,42 @@ func (m *QueryWorkflowRequest) Unmarshal(dAtA []byte) error {
 				return io.ErrUnexpectedEOF
 			}
 			m.ForwardedSource = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field VersionDirective", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.VersionDirective == nil {
+				m.VersionDirective = &v18.TaskVersionDirective{}
+			}
+			if err := m.VersionDirective.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -7243,7 +10833,7 @@ func (m *CancelOutstandingPollRequest) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				m.TaskQueueType |= v16.TaskQueueType(b&0x7F) << shift
+				m.TaskQueueType |= v19.TaskQueueType(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
@@ -7734,6 +11324,38 @@ func (m *ListTaskQueuePartitionsRequest) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRequestResponse(dAtA[iNdEx:])
@@ -7855,6 +11477,2058 @@ func (m *ListTaskQueuePartitionsResponse) Unmarshal(dAtA []byte) error {
 				return err
 			}
 			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateWorkerBuildIdCompatibilityRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateWorkerBuildIdCompatibilityRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field ApplyPublicRequest", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			v := &UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest{}
+			if err := v.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			m.Operation = &UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest_{v}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field RemoveBuildIds", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			v := &UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds{}
+			if err := v.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			m.Operation = &UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds_{v}
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field PersistUnknownBuildId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.Operation = &UpdateWorkerBuildIdCompatibilityRequest_PersistUnknownBuildId{string(dAtA[iNdEx:postIndex])}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_ApplyPublicRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ApplyPublicRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ApplyPublicRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Request == nil {
+				m.Request = &v1.UpdateWorkerBuildIdCompatibilityRequest{}
+			}
+			if err := m.Request.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityRequest_RemoveBuildIds) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: RemoveBuildIds: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: RemoveBuildIds: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field KnownUserDataVersion", wireType)
+			}
+			m.KnownUserDataVersion = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.KnownUserDataVersion |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildIds", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BuildIds = append(m.BuildIds, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateWorkerBuildIdCompatibilityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateWorkerBuildIdCompatibilityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateWorkerBuildIdCompatibilityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetWorkerBuildIdCompatibilityRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetWorkerBuildIdCompatibilityRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetWorkerBuildIdCompatibilityRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Request", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Request == nil {
+				m.Request = &v1.GetWorkerBuildIdCompatibilityRequest{}
+			}
+			if err := m.Request.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetWorkerBuildIdCompatibilityResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetWorkerBuildIdCompatibilityResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetWorkerBuildIdCompatibilityResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field Response", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.Response == nil {
+				m.Response = &v1.GetWorkerBuildIdCompatibilityResponse{}
+			}
+			if err := m.Response.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetTaskQueueUserDataRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetTaskQueueUserDataRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetTaskQueueUserDataRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field LastKnownUserDataVersion", wireType)
+			}
+			m.LastKnownUserDataVersion = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.LastKnownUserDataVersion |= int64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		case 4:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field WaitNewData", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.WaitNewData = bool(v != 0)
+		case 5:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueueType", wireType)
+			}
+			m.TaskQueueType = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TaskQueueType |= v19.TaskQueueType(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetTaskQueueUserDataResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetTaskQueueUserDataResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetTaskQueueUserDataResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueueHasUserData", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.TaskQueueHasUserData = bool(v != 0)
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UserData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.UserData == nil {
+				m.UserData = &v110.VersionedTaskQueueUserData{}
+			}
+			if err := m.UserData.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ApplyTaskQueueUserDataReplicationEventRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ApplyTaskQueueUserDataReplicationEventRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ApplyTaskQueueUserDataReplicationEventRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UserData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.UserData == nil {
+				m.UserData = &v110.TaskQueueUserData{}
+			}
+			if err := m.UserData.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ApplyTaskQueueUserDataReplicationEventResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ApplyTaskQueueUserDataReplicationEventResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ApplyTaskQueueUserDataReplicationEventResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetBuildIdTaskQueueMappingRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetBuildIdTaskQueueMappingRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetBuildIdTaskQueueMappingRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BuildId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *GetBuildIdTaskQueueMappingResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: GetBuildIdTaskQueueMappingResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: GetBuildIdTaskQueueMappingResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueues", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueues = append(m.TaskQueues, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ForceUnloadTaskQueueRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ForceUnloadTaskQueueRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ForceUnloadTaskQueueRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueueType", wireType)
+			}
+			m.TaskQueueType = 0
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				m.TaskQueueType |= v19.TaskQueueType(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ForceUnloadTaskQueueResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ForceUnloadTaskQueueResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ForceUnloadTaskQueueResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 0 {
+				return fmt.Errorf("proto: wrong wireType = %d for field WasLoaded", wireType)
+			}
+			var v int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				v |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			m.WasLoaded = bool(v != 0)
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateTaskQueueUserDataRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateTaskQueueUserDataRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateTaskQueueUserDataRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UserData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.UserData == nil {
+				m.UserData = &v110.VersionedTaskQueueUserData{}
+			}
+			if err := m.UserData.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		case 4:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildIdsAdded", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BuildIdsAdded = append(m.BuildIdsAdded, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		case 5:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field BuildIdsRemoved", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.BuildIdsRemoved = append(m.BuildIdsRemoved, string(dAtA[iNdEx:postIndex]))
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *UpdateTaskQueueUserDataResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: UpdateTaskQueueUserDataResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: UpdateTaskQueueUserDataResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ReplicateTaskQueueUserDataRequest) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ReplicateTaskQueueUserDataRequest: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ReplicateTaskQueueUserDataRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
+		case 1:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field NamespaceId", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.NamespaceId = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 2:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field TaskQueue", wireType)
+			}
+			var stringLen uint64
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				stringLen |= uint64(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			intStringLen := int(stringLen)
+			if intStringLen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + intStringLen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			m.TaskQueue = string(dAtA[iNdEx:postIndex])
+			iNdEx = postIndex
+		case 3:
+			if wireType != 2 {
+				return fmt.Errorf("proto: wrong wireType = %d for field UserData", wireType)
+			}
+			var msglen int
+			for shift := uint(0); ; shift += 7 {
+				if shift >= 64 {
+					return ErrIntOverflowRequestResponse
+				}
+				if iNdEx >= l {
+					return io.ErrUnexpectedEOF
+				}
+				b := dAtA[iNdEx]
+				iNdEx++
+				msglen |= int(b&0x7F) << shift
+				if b < 0x80 {
+					break
+				}
+			}
+			if msglen < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			postIndex := iNdEx + msglen
+			if postIndex < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if postIndex > l {
+				return io.ErrUnexpectedEOF
+			}
+			if m.UserData == nil {
+				m.UserData = &v110.TaskQueueUserData{}
+			}
+			if err := m.UserData.Unmarshal(dAtA[iNdEx:postIndex]); err != nil {
+				return err
+			}
+			iNdEx = postIndex
+		default:
+			iNdEx = preIndex
+			skippy, err := skipRequestResponse(dAtA[iNdEx:])
+			if err != nil {
+				return err
+			}
+			if skippy < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) < 0 {
+				return ErrInvalidLengthRequestResponse
+			}
+			if (iNdEx + skippy) > l {
+				return io.ErrUnexpectedEOF
+			}
+			iNdEx += skippy
+		}
+	}
+
+	if iNdEx > l {
+		return io.ErrUnexpectedEOF
+	}
+	return nil
+}
+func (m *ReplicateTaskQueueUserDataResponse) Unmarshal(dAtA []byte) error {
+	l := len(dAtA)
+	iNdEx := 0
+	for iNdEx < l {
+		preIndex := iNdEx
+		var wire uint64
+		for shift := uint(0); ; shift += 7 {
+			if shift >= 64 {
+				return ErrIntOverflowRequestResponse
+			}
+			if iNdEx >= l {
+				return io.ErrUnexpectedEOF
+			}
+			b := dAtA[iNdEx]
+			iNdEx++
+			wire |= uint64(b&0x7F) << shift
+			if b < 0x80 {
+				break
+			}
+		}
+		fieldNum := int32(wire >> 3)
+		wireType := int(wire & 0x7)
+		if wireType == 4 {
+			return fmt.Errorf("proto: ReplicateTaskQueueUserDataResponse: wiretype end group for non-group")
+		}
+		if fieldNum <= 0 {
+			return fmt.Errorf("proto: ReplicateTaskQueueUserDataResponse: illegal tag %d (wire type %d)", fieldNum, wire)
+		}
+		switch fieldNum {
 		default:
 			iNdEx = preIndex
 			skippy, err := skipRequestResponse(dAtA[iNdEx:])

@@ -22,22 +22,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+//go:generate mockgen -copyright_file ../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination task_mock.go
+
 package tasks
 
 import (
 	"time"
+
+	enumsspb "go.temporal.io/server/api/enums/v1"
 )
 
 type (
-	Key struct {
-		// FireTime is the scheduled time of the task
-		FireTime time.Time
-		// TaskID is the ID of the task
-		TaskID int64
-	}
-
-	Keys []Key
-
 	// Task is the generic task interface
 	Task interface {
 		GetKey() Key
@@ -47,45 +42,10 @@ type (
 		GetTaskID() int64
 		GetVisibilityTime() time.Time
 		GetVersion() int64
+		GetCategory() Category
+		GetType() enumsspb.TaskType
 
-		SetVersion(version int64)
 		SetTaskID(id int64)
 		SetVisibilityTime(timestamp time.Time)
 	}
 )
-
-func (left Key) CompareTo(right Key) int {
-	if left.FireTime.Before(right.FireTime) {
-		return -1
-	} else if left.FireTime.After(right.FireTime) {
-		return 1
-	}
-
-	if left.TaskID < right.TaskID {
-		return -1
-	} else if left.TaskID > right.TaskID {
-		return 1
-	}
-	return 0
-}
-
-// Len implements sort.Interface
-func (s Keys) Len() int {
-	return len(s)
-}
-
-// Swap implements sort.Interface.
-func (s Keys) Swap(
-	this int,
-	that int,
-) {
-	s[this], s[that] = s[that], s[this]
-}
-
-// Less implements sort.Interface
-func (s Keys) Less(
-	this int,
-	that int,
-) bool {
-	return s[this].CompareTo(s[that]) < 0
-}

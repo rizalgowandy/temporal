@@ -28,6 +28,22 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"go.temporal.io/api/serviceerror"
+
+	"go.temporal.io/server/common/util"
+)
+
+const (
+	throttleRetryInitialInterval    = time.Second
+	throttleRetryMaxInterval        = 10 * time.Second
+	throttleRetryExpirationInterval = NoInterval
+)
+
+var (
+	throttleRetryPolicy = NewExponentialRetryPolicy(throttleRetryInitialInterval).
+		WithMaximumInterval(throttleRetryMaxInterval).
+		WithExpirationInterval(throttleRetryExpirationInterval)
 )
 
 type (
@@ -97,17 +113,18 @@ func NewConcurrentRetrier(retryPolicy RetryPolicy) *ConcurrentRetrier {
 	return &ConcurrentRetrier{retrier: retrier}
 }
 
-// Retry function can be used to wrap any call with retry logic using the passed
-// in policy. A `nil` IsRetryable predicate will retry all errors. There is a
-// context-aware version of this function: RetryContext.
-func Retry(operation Operation, policy RetryPolicy, isRetryable IsRetryable) error {
+// ThrottleRetry is a resource aware version of Retry.
+// Resource exhausted error will be retried using a different throttle retry policy, instead of the specified one.
+func ThrottleRetry(operation Operation, policy RetryPolicy, isRetryable IsRetryable) error {
 	ctxOp := func(context.Context) error { return operation() }
-	return RetryContext(context.Background(), ctxOp, policy, isRetryable)
+	return ThrottleRetryContext(context.Background(), ctxOp, policy, isRetryable)
 }
 
-// RetryContext is a context-aware version of Retry. Context
-// timeout/cancellation errors are never retried, regardless of IsRetryable.
-func RetryContext(
+// ThrottleRetryContext is a context and resource aware version of Retry.
+// Context timeout/cancellation errors are never retried, regardless of IsRetryable.
+// Resource exhausted error will be retried using a different throttle retry policy, instead of the specified one.
+// TODO: allow customizing throttle retry policy and what kind of error are categorized as throttle error.
+func ThrottleRetryContext(
 	ctx context.Context,
 	operation OperationCtx,
 	policy RetryPolicy,
@@ -120,7 +137,10 @@ func RetryContext(
 		isRetryable = func(error) bool { return true }
 	}
 
+	deadline, hasDeadline := ctx.Deadline()
+
 	r := NewRetrier(policy, SystemClock)
+	t := NewRetrier(throttleRetryPolicy, SystemClock)
 	for ctx.Err() == nil {
 		if err = operation(ctx); err == nil {
 			return nil
@@ -130,19 +150,29 @@ func RetryContext(
 			return err
 		}
 
-		// stop retrying if context has expired or the error
-		// is not retryable (err is known to be non-nil here)
 		if err == ctx.Err() || !isRetryable(err) {
 			return err
 		}
 
-		t := time.NewTimer(next)
-		select {
-		case <-t.C:
-		case <-ctx.Done():
-			t.Stop()
+		if _, ok := err.(*serviceerror.ResourceExhausted); ok {
+			next = util.Max(next, t.NextBackOff())
+		}
+
+		if hasDeadline && SystemClock.Now().Add(next).After(deadline) {
 			break
 		}
+
+		timer := time.NewTimer(next)
+		select {
+		case <-timer.C:
+		case <-ctx.Done():
+			timer.Stop()
+		}
+	}
+	// always return the last error we got from operation, even if it is not useful
+	// this retry utility does not have enough information to do any filtering/mapping
+	if err != nil {
+		return err
 	}
 	return ctx.Err()
 }

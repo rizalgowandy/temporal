@@ -25,151 +25,150 @@
 package tests
 
 import (
-	"fmt"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/persistence/cassandra"
-	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
+	persistencetests "go.temporal.io/server/common/persistence/persistence-tests"
+	"go.temporal.io/server/common/persistence/serialization"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
-	"go.temporal.io/server/common/resolver"
-	"go.temporal.io/server/common/shuffle"
-	"go.temporal.io/server/environment"
 )
 
-// TODO merge the initialization with existing persistence setup
-const (
-	testCassandraClusterName = "temporal_cassandra_cluster"
+func TestCassandraShardStoreSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
 
-	testCassandraUser               = "temporal"
-	testCassandraPassword           = "temporal"
-	testCassandraDatabaseNamePrefix = "test_"
-	testCassandraDatabaseNameSuffix = "temporal_persistence"
-
-	// TODO hard code this dir for now
-	//  need to merge persistence test config / initialization in one place
-	testCassandraExecutionSchema  = "../../../schema/cassandra/temporal/schema.cql"
-	testCassandraVisibilitySchema = "../../../schema/cassandra/visibility/schema.cql"
-)
-
-func TestCassandraHistoryStoreSuite(t *testing.T) {
-	cfg := NewCassandraConfig()
-	SetupCassandraDatabase(cfg)
-	SetupCassandraSchema(cfg)
-	logger := log.NewNoopLogger()
-	factory := cassandra.NewFactory(
-		*cfg,
-		resolver.NewNoopResolver(),
-		testCassandraClusterName,
-		logger,
-	)
-	store, err := factory.NewExecutionStore()
+	shardStore, err := testData.Factory.NewShardStore()
 	if err != nil {
 		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
-	defer func() {
-		factory.Close()
-		TearDownCassandraKeyspace(cfg)
-	}()
 
-	s := newHistoryEventsSuite(t, store, logger)
+	s := NewShardSuite(
+		t,
+		shardStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
 	suite.Run(t, s)
 }
 
-// NewCassandraConfig returns a new Cassandra config for test
-func NewCassandraConfig() *config.Cassandra {
-	return &config.Cassandra{
-		User:     testCassandraUser,
-		Password: testCassandraPassword,
-		Hosts:    environment.GetCassandraAddress(),
-		Port:     environment.GetCassandraPort(),
-		Keyspace: testCassandraDatabaseNamePrefix + shuffle.String(testCassandraDatabaseNameSuffix),
+func TestCassandraExecutionMutableStateStoreSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
+
+	shardStore, err := testData.Factory.NewShardStore()
+	if err != nil {
+		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
+	executionStore, err := testData.Factory.NewExecutionStore()
+	if err != nil {
+		t.Fatalf("unable to create Cassandra DB: %v", err)
+	}
+
+	s := NewExecutionMutableStateSuite(
+		t,
+		shardStore,
+		executionStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
+	suite.Run(t, s)
 }
 
-func SetupCassandraDatabase(cfg *config.Cassandra) {
-	adminCfg := *cfg
-	// NOTE need to connect with empty name to create new database
-	adminCfg.Keyspace = "system"
+func TestCassandraExecutionMutableStateTaskStoreSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
 
-	session, err := gocql.NewSession(adminCfg, resolver.NewNoopResolver(), log.NewNoopLogger())
+	shardStore, err := testData.Factory.NewShardStore()
 	if err != nil {
-		panic(fmt.Sprintf("unable to create Cassandra session: %v", err))
+		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
-	defer session.Close()
+	executionStore, err := testData.Factory.NewExecutionStore()
+	if err != nil {
+		t.Fatalf("unable to create Cassandra DB: %v", err)
+	}
 
-	if err := cassandra.CreateCassandraKeyspace(
-		session,
-		cfg.Keyspace,
-		1,
-		true,
-		log.NewNoopLogger(),
-	); err != nil {
-		panic(fmt.Sprintf("unable to create Cassandra keyspace: %v", err))
-	}
+	s := NewExecutionMutableStateTaskSuite(
+		t,
+		shardStore,
+		executionStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
+	suite.Run(t, s)
 }
 
-func SetupCassandraSchema(cfg *config.Cassandra) {
-	session, err := gocql.NewSession(*cfg, resolver.NewNoopResolver(), log.NewNoopLogger())
+func TestCassandraHistoryStoreSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
+
+	store, err := testData.Factory.NewExecutionStore()
 	if err != nil {
-		panic(fmt.Sprintf("unable to create Cassandra session: %v", err))
-	}
-	defer session.Close()
-
-	schemaPath, err := filepath.Abs(testCassandraExecutionSchema)
-	if err != nil {
-		panic(err)
+		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
 
-	statements, err := p.LoadAndSplitQuery([]string{schemaPath})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, stmt := range statements {
-		if err = session.Query(stmt).Exec(); err != nil {
-			panic(err)
-		}
-	}
-
-	schemaPath, err = filepath.Abs(testCassandraVisibilitySchema)
-	if err != nil {
-		panic(err)
-	}
-
-	statements, err = p.LoadAndSplitQuery([]string{schemaPath})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, stmt := range statements {
-		if err = session.Query(stmt).Exec(); err != nil {
-			panic(err)
-		}
-	}
+	s := NewHistoryEventsSuite(t, store, testData.Logger)
+	suite.Run(t, s)
 }
 
-func TearDownCassandraKeyspace(cfg *config.Cassandra) {
-	adminCfg := *cfg
-	// NOTE need to connect with empty name to create new database
-	adminCfg.Keyspace = "system"
+func TestCassandraTaskQueueSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
 
-	session, err := gocql.NewSession(adminCfg, resolver.NewNoopResolver(), log.NewNoopLogger())
+	taskQueueStore, err := testData.Factory.NewTaskStore()
 	if err != nil {
-		panic(fmt.Sprintf("unable to create Cassandra session: %v", err))
+		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
-	defer session.Close()
 
-	if err := cassandra.DropCassandraKeyspace(
-		session,
-		cfg.Keyspace,
-		log.NewNoopLogger(),
-	); err != nil {
-		panic(fmt.Sprintf("unable to drop Cassandra keyspace: %v", err))
+	s := NewTaskQueueSuite(t, taskQueueStore, testData.Logger)
+	suite.Run(t, s)
+}
+
+func TestCassandraTaskQueueTaskSuite(t *testing.T) {
+	testData, tearDown := setUpCassandraTest(t)
+	defer tearDown()
+
+	taskQueueStore, err := testData.Factory.NewTaskStore()
+	if err != nil {
+		t.Fatalf("unable to create Cassandra DB: %v", err)
 	}
+
+	s := NewTaskQueueTaskSuite(t, taskQueueStore, testData.Logger)
+	suite.Run(t, s)
+}
+
+func TestCassandraVisibilityPersistence(t *testing.T) {
+	s := &VisibilityPersistenceSuite{
+		TestBase: persistencetests.NewTestBaseWithCassandra(&persistencetests.TestBaseOptions{}),
+	}
+	suite.Run(t, s)
+}
+
+// TODO: Merge persistence-tests into the tests directory.
+
+func TestCassandraHistoryV2Persistence(t *testing.T) {
+	s := new(persistencetests.HistoryV2PersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithCassandra(&persistencetests.TestBaseOptions{})
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestCassandraMetadataPersistenceV2(t *testing.T) {
+	s := new(persistencetests.MetadataPersistenceSuiteV2)
+	s.TestBase = persistencetests.NewTestBaseWithCassandra(&persistencetests.TestBaseOptions{})
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestCassandraQueuePersistence(t *testing.T) {
+	s := new(persistencetests.QueuePersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithCassandra(&persistencetests.TestBaseOptions{})
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestCassandraClusterMetadataPersistence(t *testing.T) {
+	s := new(persistencetests.ClusterMetadataManagerSuite)
+	s.TestBase = persistencetests.NewTestBaseWithCassandra(&persistencetests.TestBaseOptions{})
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
 }

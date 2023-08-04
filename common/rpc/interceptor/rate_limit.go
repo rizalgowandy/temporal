@@ -28,7 +28,9 @@ import (
 	"context"
 	"time"
 
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
+	"go.temporal.io/server/common/headers"
 	"google.golang.org/grpc"
 
 	"go.temporal.io/server/common/quotas"
@@ -39,7 +41,7 @@ const (
 )
 
 var (
-	RateLimitServerBusy = serviceerror.NewResourceExhausted("service rate limit exceeded")
+	RateLimitServerBusy = serviceerror.NewResourceExhausted(enumspb.RESOURCE_EXHAUSTED_CAUSE_RPS_LIMIT, "service rate limit exceeded")
 )
 
 type (
@@ -67,7 +69,7 @@ func (i *RateLimitInterceptor) Intercept(
 	info *grpc.UnaryServerInfo,
 	handler grpc.UnaryHandler,
 ) (interface{}, error) {
-	_, methodName := splitMethodName(info.FullMethod)
+	_, methodName := SplitMethodName(info.FullMethod)
 	token, ok := i.tokens[methodName]
 	if !ok {
 		token = RateLimitDefaultToken
@@ -76,7 +78,10 @@ func (i *RateLimitInterceptor) Intercept(
 	if !i.rateLimiter.Allow(time.Now().UTC(), quotas.NewRequest(
 		methodName,
 		token,
-		"", // this interceptor layer does not throttle based on caller
+		"", // this interceptor layer does not throttle based on caller name
+		headers.GetValues(ctx, headers.CallerTypeHeaderName)[0],
+		0,  // this interceptor layer does not throttle based on caller segment
+		"", // this interceptor layer does not throttle based on call initiation
 	)) {
 		return nil, RateLimitServerBusy
 	}

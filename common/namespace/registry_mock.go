@@ -29,10 +29,12 @@
 package namespace
 
 import (
+	context "context"
 	reflect "reflect"
 	time "time"
 
 	gomock "github.com/golang/mock/gomock"
+	common "go.temporal.io/server/common"
 	persistence "go.temporal.io/server/common/persistence"
 )
 
@@ -97,48 +99,48 @@ func (m *MockPersistence) EXPECT() *MockPersistenceMockRecorder {
 }
 
 // GetMetadata mocks base method.
-func (m *MockPersistence) GetMetadata() (*persistence.GetMetadataResponse, error) {
+func (m *MockPersistence) GetMetadata(arg0 context.Context) (*persistence.GetMetadataResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetMetadata")
+	ret := m.ctrl.Call(m, "GetMetadata", arg0)
 	ret0, _ := ret[0].(*persistence.GetMetadataResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetMetadata indicates an expected call of GetMetadata.
-func (mr *MockPersistenceMockRecorder) GetMetadata() *gomock.Call {
+func (mr *MockPersistenceMockRecorder) GetMetadata(arg0 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMetadata", reflect.TypeOf((*MockPersistence)(nil).GetMetadata))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetMetadata", reflect.TypeOf((*MockPersistence)(nil).GetMetadata), arg0)
 }
 
 // GetNamespace mocks base method.
-func (m *MockPersistence) GetNamespace(request *persistence.GetNamespaceRequest) (*persistence.GetNamespaceResponse, error) {
+func (m *MockPersistence) GetNamespace(arg0 context.Context, arg1 *persistence.GetNamespaceRequest) (*persistence.GetNamespaceResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetNamespace", request)
+	ret := m.ctrl.Call(m, "GetNamespace", arg0, arg1)
 	ret0, _ := ret[0].(*persistence.GetNamespaceResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // GetNamespace indicates an expected call of GetNamespace.
-func (mr *MockPersistenceMockRecorder) GetNamespace(request interface{}) *gomock.Call {
+func (mr *MockPersistenceMockRecorder) GetNamespace(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNamespace", reflect.TypeOf((*MockPersistence)(nil).GetNamespace), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNamespace", reflect.TypeOf((*MockPersistence)(nil).GetNamespace), arg0, arg1)
 }
 
 // ListNamespaces mocks base method.
-func (m *MockPersistence) ListNamespaces(arg0 *persistence.ListNamespacesRequest) (*persistence.ListNamespacesResponse, error) {
+func (m *MockPersistence) ListNamespaces(arg0 context.Context, arg1 *persistence.ListNamespacesRequest) (*persistence.ListNamespacesResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListNamespaces", arg0)
+	ret := m.ctrl.Call(m, "ListNamespaces", arg0, arg1)
 	ret0, _ := ret[0].(*persistence.ListNamespacesResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListNamespaces indicates an expected call of ListNamespaces.
-func (mr *MockPersistenceMockRecorder) ListNamespaces(arg0 interface{}) *gomock.Call {
+func (mr *MockPersistenceMockRecorder) ListNamespaces(arg0, arg1 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNamespaces", reflect.TypeOf((*MockPersistence)(nil).ListNamespaces), arg0)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListNamespaces", reflect.TypeOf((*MockPersistence)(nil).ListNamespaces), arg0, arg1)
 }
 
 // MockRegistry is a mock of Registry interface.
@@ -177,6 +179,21 @@ func (m *MockRegistry) GetCacheSize() (int64, int64) {
 func (mr *MockRegistryMockRecorder) GetCacheSize() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCacheSize", reflect.TypeOf((*MockRegistry)(nil).GetCacheSize))
+}
+
+// GetCustomSearchAttributesMapper mocks base method.
+func (m *MockRegistry) GetCustomSearchAttributesMapper(name Name) (CustomSearchAttributesMapper, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetCustomSearchAttributesMapper", name)
+	ret0, _ := ret[0].(CustomSearchAttributesMapper)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetCustomSearchAttributesMapper indicates an expected call of GetCustomSearchAttributesMapper.
+func (mr *MockRegistryMockRecorder) GetCustomSearchAttributesMapper(name interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetCustomSearchAttributesMapper", reflect.TypeOf((*MockRegistry)(nil).GetCustomSearchAttributesMapper), name)
 }
 
 // GetNamespace mocks base method.
@@ -239,28 +256,30 @@ func (mr *MockRegistryMockRecorder) GetNamespaceName(id interface{}) *gomock.Cal
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNamespaceName", reflect.TypeOf((*MockRegistry)(nil).GetNamespaceName), id)
 }
 
-// Refresh mocks base method.
-func (m *MockRegistry) Refresh() {
+// GetPingChecks mocks base method.
+func (m *MockRegistry) GetPingChecks() []common.PingCheck {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "Refresh")
+	ret := m.ctrl.Call(m, "GetPingChecks")
+	ret0, _ := ret[0].([]common.PingCheck)
+	return ret0
 }
 
-// Refresh indicates an expected call of Refresh.
-func (mr *MockRegistryMockRecorder) Refresh() *gomock.Call {
+// GetPingChecks indicates an expected call of GetPingChecks.
+func (mr *MockRegistryMockRecorder) GetPingChecks() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Refresh", reflect.TypeOf((*MockRegistry)(nil).Refresh))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPingChecks", reflect.TypeOf((*MockRegistry)(nil).GetPingChecks))
 }
 
-// RegisterNamespaceChangeCallback mocks base method.
-func (m *MockRegistry) RegisterNamespaceChangeCallback(shard int32, initialNotificationVersion int64, prepareCallback PrepareCallbackFn, callback CallbackFn) {
+// RegisterStateChangeCallback mocks base method.
+func (m *MockRegistry) RegisterStateChangeCallback(key any, cb StateChangeCallbackFn) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "RegisterNamespaceChangeCallback", shard, initialNotificationVersion, prepareCallback, callback)
+	m.ctrl.Call(m, "RegisterStateChangeCallback", key, cb)
 }
 
-// RegisterNamespaceChangeCallback indicates an expected call of RegisterNamespaceChangeCallback.
-func (mr *MockRegistryMockRecorder) RegisterNamespaceChangeCallback(shard, initialNotificationVersion, prepareCallback, callback interface{}) *gomock.Call {
+// RegisterStateChangeCallback indicates an expected call of RegisterStateChangeCallback.
+func (mr *MockRegistryMockRecorder) RegisterStateChangeCallback(key, cb interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterNamespaceChangeCallback), shard, initialNotificationVersion, prepareCallback, callback)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterStateChangeCallback", reflect.TypeOf((*MockRegistry)(nil).RegisterStateChangeCallback), key, cb)
 }
 
 // Start mocks base method.
@@ -287,14 +306,14 @@ func (mr *MockRegistryMockRecorder) Stop() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockRegistry)(nil).Stop))
 }
 
-// UnregisterNamespaceChangeCallback mocks base method.
-func (m *MockRegistry) UnregisterNamespaceChangeCallback(shard int32) {
+// UnregisterStateChangeCallback mocks base method.
+func (m *MockRegistry) UnregisterStateChangeCallback(key any) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "UnregisterNamespaceChangeCallback", shard)
+	m.ctrl.Call(m, "UnregisterStateChangeCallback", key)
 }
 
-// UnregisterNamespaceChangeCallback indicates an expected call of UnregisterNamespaceChangeCallback.
-func (mr *MockRegistryMockRecorder) UnregisterNamespaceChangeCallback(shard interface{}) *gomock.Call {
+// UnregisterStateChangeCallback indicates an expected call of UnregisterStateChangeCallback.
+func (mr *MockRegistryMockRecorder) UnregisterStateChangeCallback(key interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterNamespaceChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterNamespaceChangeCallback), shard)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnregisterStateChangeCallback", reflect.TypeOf((*MockRegistry)(nil).UnregisterStateChangeCallback), key)
 }

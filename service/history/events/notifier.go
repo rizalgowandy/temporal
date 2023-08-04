@@ -48,10 +48,11 @@ const (
 
 type (
 	Notifier interface {
-		common.Daemon
 		NotifyNewHistoryEvent(event *Notification)
 		WatchHistoryEvent(identifier definition.WorkflowKey) (string, chan *Notification, error)
 		UnwatchHistoryEvent(identifier definition.WorkflowKey, subscriberID string) error
+		Start()
+		Stop()
 	}
 
 	Notification struct {
@@ -67,8 +68,8 @@ type (
 	}
 
 	NotifierImpl struct {
-		timeSource clock.TimeSource
-		metrics    metrics.Client
+		timeSource     clock.TimeSource
+		metricsHandler metrics.Handler
 		// internal status indicator
 		status int32
 		// stop signal channel
@@ -118,7 +119,7 @@ func NewNotification(
 
 func NewNotifier(
 	timeSource clock.TimeSource,
-	metrics metrics.Client,
+	metricsHandler metrics.Handler,
 	workflowIDToShardID func(namespace.ID, string) int32,
 ) *NotifierImpl {
 
@@ -130,11 +131,11 @@ func NewNotifier(
 		return uint32(workflowIDToShardID(namespace.ID(notification.ID.NamespaceID), notification.ID.WorkflowID))
 	}
 	return &NotifierImpl{
-		timeSource: timeSource,
-		metrics:    metrics,
-		status:     common.DaemonStatusInitialized,
-		closeChan:  make(chan bool),
-		eventsChan: make(chan *Notification, eventsChanSize),
+		timeSource:     timeSource,
+		metricsHandler: metricsHandler.WithTags(metrics.OperationTag(metrics.HistoryEventNotificationScope)),
+		status:         common.DaemonStatusInitialized,
+		closeChan:      make(chan bool),
+		eventsChan:     make(chan *Notification, eventsChanSize),
 
 		workflowIDToShardID: workflowIDToShardID,
 
@@ -197,9 +198,11 @@ func (notifier *NotifierImpl) UnwatchHistoryEvent(
 func (notifier *NotifierImpl) dispatchHistoryEventNotification(event *Notification) {
 	identifier := event.ID
 
-	timer := notifier.metrics.StartTimer(metrics.HistoryEventNotificationScope, metrics.HistoryEventNotificationFanoutLatency)
-	defer timer.Stop()
-	notifier.eventsPubsubs.GetAndDo(identifier, func(key interface{}, value interface{}) error { //nolint:errcheck
+	startTime := time.Now().UTC()
+	defer func() {
+		notifier.metricsHandler.Timer(metrics.HistoryEventNotificationFanoutLatency.GetMetricName()).Record(time.Since(startTime))
+	}()
+	_, _, _ = notifier.eventsPubsubs.GetAndDo(identifier, func(key interface{}, value interface{}) error {
 		subscribers := value.(map[string]chan *Notification)
 
 		for _, channel := range subscribers {
@@ -222,22 +225,19 @@ func (notifier *NotifierImpl) enqueueHistoryEventNotification(event *Notificatio
 	default:
 		// in case the channel is already filled with message
 		// this can be caused by high load
-		notifier.metrics.IncCounter(metrics.HistoryEventNotificationScope,
-			metrics.HistoryEventNotificationFailDeliveryCount)
+		notifier.metricsHandler.Counter(metrics.HistoryEventNotificationFailDeliveryCount.GetMetricName()).Record(1)
 	}
 }
 
 func (notifier *NotifierImpl) dequeueHistoryEventNotifications() {
 	for {
 		// send out metrics about the current number of messages in flight
-		notifier.metrics.UpdateGauge(metrics.HistoryEventNotificationScope,
-			metrics.HistoryEventNotificationInFlightMessageGauge, float64(len(notifier.eventsChan)))
+		notifier.metricsHandler.Gauge(metrics.HistoryEventNotificationInFlightMessageGauge.GetMetricName()).Record(float64(len(notifier.eventsChan)))
 		select {
 		case event := <-notifier.eventsChan:
 			// send out metrics about message processing delay
 			timeelapsed := time.Since(event.Timestamp)
-			notifier.metrics.RecordTimer(metrics.HistoryEventNotificationScope,
-				metrics.HistoryEventNotificationQueueingLatency, timeelapsed)
+			notifier.metricsHandler.Timer(metrics.HistoryEventNotificationQueueingLatency.GetMetricName()).Record(timeelapsed)
 
 			notifier.dispatchHistoryEventNotification(event)
 		case <-notifier.closeChan:

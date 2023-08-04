@@ -25,150 +25,595 @@
 package tests
 
 import (
-	"fmt"
-	"net"
-	"path/filepath"
-	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
 
-	"go.temporal.io/server/common/config"
-	"go.temporal.io/server/common/log"
-	p "go.temporal.io/server/common/persistence"
+	persistencetests "go.temporal.io/server/common/persistence/persistence-tests"
+	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/persistence/sql"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"
+	sqltests "go.temporal.io/server/common/persistence/sql/sqlplugin/tests"
 	"go.temporal.io/server/common/resolver"
-	"go.temporal.io/server/common/shuffle"
-	"go.temporal.io/server/environment"
 )
 
-// TODO merge the initialization with existing persistence setup
-const (
-	testMySQLClusterName = "temporal_mysql_cluster"
+func TestMySQLShardStoreSuite(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
 
-	testMySQLUser               = "temporal"
-	testMySQLPassword           = "temporal"
-	testMySQLConnectionProtocol = "tcp"
-	testMySQLDatabaseNamePrefix = "test_"
-	testMySQLDatabaseNameSuffix = "temporal_persistence"
+	shardStore, err := testData.Factory.NewShardStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
 
-	// TODO hard code this dir for now
-	//  need to merge persistence test config / initialization in one place
-	testMySQLExecutionSchema  = "../../../schema/mysql/v57/temporal/schema.sql"
-	testMySQLVisibilitySchema = "../../../schema/mysql/v57/visibility/schema.sql"
-)
+	s := NewShardSuite(
+		t,
+		shardStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
+	suite.Run(t, s)
+}
+
+func TestMySQLExecutionMutableStateStoreSuite(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	shardStore, err := testData.Factory.NewShardStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	executionStore, err := testData.Factory.NewExecutionStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+
+	s := NewExecutionMutableStateSuite(
+		t,
+		shardStore,
+		executionStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
+	suite.Run(t, s)
+}
+
+func TestMySQLExecutionMutableStateTaskStoreSuite(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	shardStore, err := testData.Factory.NewShardStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	executionStore, err := testData.Factory.NewExecutionStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+
+	s := NewExecutionMutableStateTaskSuite(
+		t,
+		shardStore,
+		executionStore,
+		serialization.NewSerializer(),
+		testData.Logger,
+	)
+	suite.Run(t, s)
+}
 
 func TestMySQLHistoryStoreSuite(t *testing.T) {
-	cfg := NewMySQLConfig()
-	SetupMySQLDatabase(cfg)
-	SetupMySQLSchema(cfg)
-	logger := log.NewNoopLogger()
-	factory := sql.NewFactory(
-		*cfg,
-		resolver.NewNoopResolver(),
-		testMySQLClusterName,
-		logger,
-	)
-	store, err := factory.NewExecutionStore()
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	store, err := testData.Factory.NewExecutionStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+
+	s := NewHistoryEventsSuite(t, store, testData.Logger)
+	suite.Run(t, s)
+}
+
+func TestMySQLTaskQueueSuite(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	taskQueueStore, err := testData.Factory.NewTaskStore()
 	if err != nil {
 		t.Fatalf("unable to create MySQL DB: %v", err)
 	}
 	defer func() {
-		factory.Close()
-		TearDownMySQLDatabase(cfg)
+		testData.Factory.Close()
+		TearDownMySQLDatabase(testData.Cfg)
 	}()
 
-	s := newHistoryEventsSuite(t, store, logger)
+	s := NewTaskQueueSuite(t, taskQueueStore, testData.Logger)
 	suite.Run(t, s)
 }
 
-// NewMySQLConfig returns a new MySQL config for test
-func NewMySQLConfig() *config.SQL {
-	return &config.SQL{
-		User:     testMySQLUser,
-		Password: testMySQLPassword,
-		ConnectAddr: net.JoinHostPort(
-			environment.GetMySQLAddress(),
-			strconv.Itoa(environment.GetMySQLPort()),
-		),
-		ConnectProtocol: testMySQLConnectionProtocol,
-		PluginName:      "mysql",
-		DatabaseName:    testMySQLDatabaseNamePrefix + shuffle.String(testMySQLDatabaseNameSuffix),
+func TestMySQLTaskQueueTaskSuite(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	taskQueueStore, err := testData.Factory.NewTaskStore()
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
 	}
+
+	s := NewTaskQueueTaskSuite(t, taskQueueStore, testData.Logger)
+	suite.Run(t, s)
 }
 
-func SetupMySQLDatabase(cfg *config.SQL) {
-	adminCfg := *cfg
-	// NOTE need to connect with empty name to create new database
-	adminCfg.DatabaseName = ""
-
-	db, err := sql.NewSQLAdminDB(sqlplugin.DbKindUnknown, &adminCfg, resolver.NewNoopResolver())
-	if err != nil {
-		panic(fmt.Sprintf("unable to create MySQL admin DB: %v", err))
+func TestMySQLVisibilityPersistenceSuite(t *testing.T) {
+	s := &VisibilityPersistenceSuite{
+		TestBase: persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQLTestClusterOption()),
 	}
-	defer func() { _ = db.Close() }()
-
-	err = db.CreateDatabase(cfg.DatabaseName)
-	if err != nil {
-		panic(fmt.Sprintf("unable to create MySQL database: %v", err))
-	}
+	suite.Run(t, s)
 }
 
-func SetupMySQLSchema(cfg *config.SQL) {
-	db, err := sql.NewSQLAdminDB(sqlplugin.DbKindUnknown, cfg, resolver.NewNoopResolver())
-	if err != nil {
-		panic(fmt.Sprintf("unable to create MySQL admin DB: %v", err))
+func TestMySQL8VisibilityPersistenceSuite(t *testing.T) {
+	s := &VisibilityPersistenceSuite{
+		TestBase: persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQL8TestClusterOption()),
 	}
-	defer func() { _ = db.Close() }()
-
-	schemaPath, err := filepath.Abs(testMySQLExecutionSchema)
-	if err != nil {
-		panic(err)
-	}
-
-	statements, err := p.LoadAndSplitQuery([]string{schemaPath})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, stmt := range statements {
-		if err = db.Exec(stmt); err != nil {
-			panic(err)
-		}
-	}
-
-	schemaPath, err = filepath.Abs(testMySQLVisibilitySchema)
-	if err != nil {
-		panic(err)
-	}
-
-	statements, err = p.LoadAndSplitQuery([]string{schemaPath})
-	if err != nil {
-		panic(err)
-	}
-
-	for _, stmt := range statements {
-		if err = db.Exec(stmt); err != nil {
-			panic(err)
-		}
-	}
+	suite.Run(t, s)
 }
 
-func TearDownMySQLDatabase(cfg *config.SQL) {
-	adminCfg := *cfg
-	// NOTE need to connect with empty name to create new database
-	adminCfg.DatabaseName = ""
+// TODO: Merge persistence-tests into the tests directory.
 
-	db, err := sql.NewSQLAdminDB(sqlplugin.DbKindUnknown, &adminCfg, resolver.NewNoopResolver())
-	if err != nil {
-		panic(fmt.Sprintf("unable to create MySQL admin DB: %v", err))
-	}
-	defer func() { _ = db.Close() }()
+func TestMySQLHistoryV2PersistenceSuite(t *testing.T) {
+	s := new(persistencetests.HistoryV2PersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQLTestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
 
-	err = db.DropDatabase(cfg.DatabaseName)
+func TestMySQLMetadataPersistenceSuiteV2(t *testing.T) {
+	s := new(persistencetests.MetadataPersistenceSuiteV2)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQLTestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQLQueuePersistence(t *testing.T) {
+	s := new(persistencetests.QueuePersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQLTestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQLClusterMetadataPersistence(t *testing.T) {
+	s := new(persistencetests.ClusterMetadataManagerSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQLTestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQL8HistoryV2PersistenceSuite(t *testing.T) {
+	s := new(persistencetests.HistoryV2PersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQL8TestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQL8MetadataPersistenceSuiteV2(t *testing.T) {
+	s := new(persistencetests.MetadataPersistenceSuiteV2)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQL8TestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQL8QueuePersistence(t *testing.T) {
+	s := new(persistencetests.QueuePersistenceSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQL8TestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+func TestMySQL8ClusterMetadataPersistence(t *testing.T) {
+	s := new(persistencetests.ClusterMetadataManagerSuite)
+	s.TestBase = persistencetests.NewTestBaseWithSQL(persistencetests.GetMySQL8TestClusterOption())
+	s.TestBase.Setup(nil)
+	suite.Run(t, s)
+}
+
+// SQL Store tests
+
+func TestMySQLNamespaceSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
 	if err != nil {
-		panic(fmt.Sprintf("unable to drop MySQL database: %v", err))
+		t.Fatalf("unable to create MySQL DB: %v", err)
 	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewNamespaceSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLQueueMessageSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewQueueMessageSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLQueueMetadataSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewQueueMetadataSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLMatchingTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewMatchingTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLMatchingTaskQueueSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewMatchingTaskQueueSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryShardSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryShardSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryNodeSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryNodeSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryTreeSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryTreeSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryCurrentExecutionSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryCurrentExecutionSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryTransferTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryTransferTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryTimerTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryTimerTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryReplicationTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryReplicationTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryVisibilityTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryVisibilityTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryReplicationDLQTaskSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryReplicationDLQTaskSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionBufferSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionBufferSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionActivitySuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionActivitySuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionChildWorkflowSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionChildWorkflowSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionTimerSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionTimerSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionRequestCancelSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionRequestCancelSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionSignalSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionSignalSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLHistoryExecutionSignalRequestSuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindMain, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewHistoryExecutionSignalRequestSuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLVisibilitySuite(t *testing.T) {
+	cfg := NewMySQLConfig()
+	SetupMySQLDatabase(cfg)
+	SetupMySQLSchema(cfg)
+	store, err := sql.NewSQLDB(sqlplugin.DbKindVisibility, cfg, resolver.NewNoopResolver())
+	if err != nil {
+		t.Fatalf("unable to create MySQL DB: %v", err)
+	}
+	defer func() {
+		_ = store.Close()
+		TearDownMySQLDatabase(cfg)
+	}()
+
+	s := sqltests.NewVisibilitySuite(t, store)
+	suite.Run(t, s)
+}
+
+func TestMySQLClosedConnectionError(t *testing.T) {
+	testData, tearDown := setUpMySQLTest(t)
+	defer tearDown()
+
+	s := newConnectionSuite(t, testData.Factory)
+	suite.Run(t, s)
 }

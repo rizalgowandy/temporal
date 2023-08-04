@@ -25,19 +25,34 @@
 package cache
 
 import (
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
+	"go.temporal.io/server/common/clock"
 )
 
-type keyType struct {
-	dummyString string
-	dummyInt    int
+type (
+	keyType struct {
+		dummyString string
+		dummyInt    int
+	}
+
+	testEntryWithCacheSize struct {
+		cacheSize int
+	}
+)
+
+func (c *testEntryWithCacheSize) CacheSize() int {
+	return c.cacheSize
 }
 
 func TestLRU(t *testing.T) {
+	t.Parallel()
+
 	cache := NewLRU(4)
 
 	cache.Put("A", "Foo")
@@ -72,6 +87,8 @@ func TestLRU(t *testing.T) {
 }
 
 func TestGenerics(t *testing.T) {
+	t.Parallel()
+
 	key := keyType{
 		dummyString: "some random key",
 		dummyInt:    59,
@@ -93,17 +110,23 @@ func TestGenerics(t *testing.T) {
 }
 
 func TestLRUWithTTL(t *testing.T) {
+	t.Parallel()
+
+	timeSource := clock.NewEventTimeSource()
 	cache := New(5, &Options{
-		TTL: time.Millisecond * 100,
+		TTL:        time.Millisecond * 100,
+		TimeSource: timeSource,
 	})
 	cache.Put("A", "foo")
 	assert.Equal(t, "foo", cache.Get("A"))
-	time.Sleep(time.Millisecond * 300)
+	timeSource.Advance(time.Millisecond * 300)
 	assert.Nil(t, cache.Get("A"))
 	assert.Equal(t, 0, cache.Size())
 }
 
 func TestLRUCacheConcurrentAccess(t *testing.T) {
+	t.Parallel()
+
 	cache := NewLRU(5)
 	values := map[string]string{
 		"A": "foo",
@@ -141,11 +164,9 @@ func TestLRUCacheConcurrentAccess(t *testing.T) {
 			<-start
 
 			for j := 0; j < 50; j++ {
-				var result []Entry
 				it := cache.Iterator()
 				for it.HasNext() {
-					entry := it.Next()
-					result = append(result, entry) //nolint:staticcheck
+					_ = it.Next()
 				}
 				it.Close()
 			}
@@ -156,122 +177,124 @@ func TestLRUCacheConcurrentAccess(t *testing.T) {
 	wg.Wait()
 }
 
-func TestRemoveFunc(t *testing.T) {
-	ch := make(chan bool)
+func TestTTL(t *testing.T) {
+	t.Parallel()
+
+	timeSource := clock.NewEventTimeSource()
 	cache := New(5, &Options{
-		RemovedFunc: func(i interface{}) {
-			_, ok := i.(*testing.T)
-			assert.True(t, ok)
-			ch <- true
-		},
-	})
-
-	cache.Put("testing", t)
-	cache.Delete("testing")
-	assert.Nil(t, cache.Get("testing"))
-
-	timeout := time.NewTimer(time.Millisecond * 300)
-	select {
-	case b := <-ch:
-		assert.True(t, b)
-	case <-timeout.C:
-		t.Error("RemovedFunc did not send true on channel ch")
-	}
-}
-
-func TestRemovedFuncWithTTL(t *testing.T) {
-	ch := make(chan bool)
-	cache := New(5, &Options{
-		TTL: time.Millisecond * 50,
-		RemovedFunc: func(i interface{}) {
-			_, ok := i.(*testing.T)
-			assert.True(t, ok)
-			ch <- true
-		},
+		TTL:        time.Millisecond * 50,
+		TimeSource: timeSource,
 	})
 
 	cache.Put("A", t)
 	assert.Equal(t, t, cache.Get("A"))
-	time.Sleep(time.Millisecond * 100)
+	timeSource.Advance(time.Millisecond * 100)
 	assert.Nil(t, cache.Get("A"))
-
-	timeout := time.NewTimer(time.Millisecond * 300)
-	select {
-	case b := <-ch:
-		assert.True(t, b)
-	case <-timeout.C:
-		t.Error("RemovedFunc did not send true on channel ch")
-	}
 }
 
-func TestRemovedFuncWithTTL_Pin(t *testing.T) {
-	ch := make(chan bool)
+func TestTTLWithPin(t *testing.T) {
+	t.Parallel()
+
+	timeSource := clock.NewEventTimeSource()
 	cache := New(5, &Options{
-		TTL: time.Millisecond * 50,
-		Pin: true,
-		RemovedFunc: func(i interface{}) {
-			_, ok := i.(*testing.T)
-			assert.True(t, ok)
-			ch <- true
-		},
+		TTL:        time.Millisecond * 50,
+		Pin:        true,
+		TimeSource: timeSource,
 	})
 
 	_, err := cache.PutIfNotExist("A", t)
 	assert.NoError(t, err)
 	assert.Equal(t, t, cache.Get("A"))
-	time.Sleep(time.Millisecond * 100)
+	timeSource.Advance(time.Millisecond * 100)
 	assert.Equal(t, t, cache.Get("A"))
 	// release 3 time since put if not exist also increase the counter
 	cache.Release("A")
 	cache.Release("A")
 	cache.Release("A")
 	assert.Nil(t, cache.Get("A"))
-
-	timeout := time.NewTimer(time.Millisecond * 300)
-	select {
-	case b := <-ch:
-		assert.True(t, b)
-	case <-timeout.C:
-		t.Error("RemovedFunc did not send true on channel ch")
-	}
 }
 
-func TestRemovedFuncMaxSize_Pin(t *testing.T) {
-	ch := make(chan bool)
-	cache := New(1, &Options{
-		TTL: time.Millisecond * 50,
-		Pin: true,
-		RemovedFunc: func(i interface{}) {
-			_, ok := i.(*testing.T)
-			assert.True(t, ok)
-			ch <- true
-		},
+func TestMaxSizeWithPin_MidItem(t *testing.T) {
+	t.Parallel()
+
+	timeSource := clock.NewEventTimeSource()
+	cache := New(2, &Options{
+		TTL:        time.Millisecond * 50,
+		Pin:        true,
+		TimeSource: timeSource,
 	})
 
 	_, err := cache.PutIfNotExist("A", t)
 	assert.NoError(t, err)
-	assert.Equal(t, t, cache.Get("A"))
-	cache.Release("A")
-
-	_, err = cache.PutIfNotExist("B", t)
-	assert.Error(t, err)
-	assert.Equal(t, t, cache.Get("A"))
-	cache.Release("A")
-	assert.Nil(t, cache.Get("B"))
-
-	// since put if not exist also increase the counter
-	cache.Release("A")
-
-	time.Sleep(time.Millisecond * 100)
-	assert.Nil(t, cache.Get("A"))
 
 	_, err = cache.PutIfNotExist("B", t)
 	assert.NoError(t, err)
+
+	_, err = cache.PutIfNotExist("C", t)
+	assert.Error(t, err)
+
+	assert.Equal(t, t, cache.Get("A"))
+	cache.Release("A") // get will also increase the ref count
 	assert.Equal(t, t, cache.Get("B"))
-	cache.Release("B")
+	cache.Release("B") // get will also increase the ref count
+
+	cache.Release("B") // B's ref count is 0
+	_, err = cache.PutIfNotExist("C", t)
+	assert.NoError(t, err)
+	assert.Equal(t, t, cache.Get("C"))
+	cache.Release("C") // get will also increase the ref count
+
+	cache.Release("A") // A's ref count is 0
+	cache.Release("C") // C's ref count is 0
+
+	timeSource.Advance(time.Millisecond * 100)
+	assert.Nil(t, cache.Get("A"))
+	assert.Nil(t, cache.Get("B"))
+	assert.Nil(t, cache.Get("C"))
+}
+
+func TestMaxSizeWithPin_LastItem(t *testing.T) {
+	t.Parallel()
+
+	timeSource := clock.NewEventTimeSource()
+	cache := New(2, &Options{
+		TTL:        time.Millisecond * 50,
+		Pin:        true,
+		TimeSource: timeSource,
+	})
+
+	_, err := cache.PutIfNotExist("A", t)
+	assert.NoError(t, err)
+
+	_, err = cache.PutIfNotExist("B", t)
+	assert.NoError(t, err)
+
+	_, err = cache.PutIfNotExist("C", t)
+	assert.Error(t, err)
+
+	assert.Equal(t, t, cache.Get("A"))
+	cache.Release("A") // get will also increase the ref count
+	assert.Equal(t, t, cache.Get("B"))
+	cache.Release("B") // get will also increase the ref count
+
+	cache.Release("A") // A's ref count is 0
+	_, err = cache.PutIfNotExist("C", t)
+	assert.NoError(t, err)
+	assert.Equal(t, t, cache.Get("C"))
+	cache.Release("C") // get will also increase the ref count
+
+	cache.Release("B") // B's ref count is 0
+	cache.Release("C") // C's ref count is 0
+
+	timeSource.Advance(time.Millisecond * 100)
+	assert.Nil(t, cache.Get("A"))
+	assert.Nil(t, cache.Get("B"))
+	assert.Nil(t, cache.Get("C"))
 }
 
 func TestIterator(t *testing.T) {
+	t.Parallel()
+
 	expected := map[string]string{
 		"A": "Alpha",
 		"B": "Beta",
@@ -305,6 +328,8 @@ func TestIterator(t *testing.T) {
 }
 
 func TestZeroSizeCache(t *testing.T) {
+	t.Parallel()
+
 	cache := NewLRU(0)
 	_, err := cache.PutIfNotExist("A", t)
 	assert.NoError(t, err)
@@ -319,4 +344,51 @@ func TestZeroSizeCache(t *testing.T) {
 	assert.Equal(t, v, t)
 	assert.Nil(t, err)
 	assert.Equal(t, 0, cache.Size())
+}
+
+func TestCache_ItemSizeTooLarge(t *testing.T) {
+	t.Parallel()
+
+	maxTotalBytes := 10
+	cache := NewLRU(maxTotalBytes)
+
+	res := cache.Put(uuid.New(), &testEntryWithCacheSize{maxTotalBytes})
+	assert.Equal(t, res, nil)
+
+	res, err := cache.PutIfNotExist(uuid.New(), &testEntryWithCacheSize{maxTotalBytes + 1})
+	assert.Equal(t, err, ErrCacheItemTooLarge)
+	assert.Equal(t, res, nil)
+
+}
+
+func TestCache_ItemHasCacheSizeDefined(t *testing.T) {
+	t.Parallel()
+
+	maxTotalBytes := 10
+	cache := NewLRU(maxTotalBytes)
+
+	numPuts := rand.Intn(1024)
+
+	startWG := sync.WaitGroup{}
+	endWG := sync.WaitGroup{}
+
+	startWG.Add(numPuts)
+	endWG.Add(numPuts)
+
+	go func() {
+		startWG.Wait()
+		assert.True(t, cache.Size() < maxTotalBytes)
+	}()
+	for i := 0; i < numPuts; i++ {
+		go func() {
+			defer endWG.Done()
+
+			startWG.Wait()
+			key := uuid.New()
+			cache.Put(key, &testEntryWithCacheSize{rand.Int()})
+		}()
+		startWG.Done()
+	}
+
+	endWG.Wait()
 }

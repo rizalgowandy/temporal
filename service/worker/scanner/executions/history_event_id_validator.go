@@ -25,7 +25,8 @@
 package executions
 
 import (
-	commonpb "go.temporal.io/api/common/v1"
+	"context"
+
 	"go.temporal.io/api/serviceerror"
 
 	"go.temporal.io/server/common"
@@ -60,6 +61,7 @@ func NewHistoryEventIDValidator(
 }
 
 func (v *historyEventIDValidator) Validate(
+	ctx context.Context,
 	mutableState *MutableState,
 ) ([]MutableStateValidationResult, error) {
 	currentVersionHistory, err := versionhistory.GetCurrentVersionHistory(
@@ -72,7 +74,7 @@ func (v *historyEventIDValidator) Validate(
 	// TODO currently history event ID validator only verifies
 	//  the first event batch exists, before doing whole history
 	//  validation, ensure not too much capacity is consumed
-	_, err = v.executionManager.ReadRawHistoryBranch(&persistence.ReadHistoryBranchRequest{
+	_, err = v.executionManager.ReadRawHistoryBranch(ctx, &persistence.ReadHistoryBranchRequest{
 		MinEventID:    common.FirstEventID,
 		MaxEventID:    common.FirstEventID + 1,
 		BranchToken:   currentVersionHistory.BranchToken,
@@ -86,13 +88,11 @@ func (v *historyEventIDValidator) Validate(
 
 	case *serviceerror.NotFound, *serviceerror.DataLoss:
 		// additionally validate mutable state is still present in DB
-		_, err = v.executionManager.GetWorkflowExecution(&persistence.GetWorkflowExecutionRequest{
+		_, err = v.executionManager.GetWorkflowExecution(ctx, &persistence.GetWorkflowExecutionRequest{
 			ShardID:     v.shardID,
 			NamespaceID: mutableState.GetExecutionInfo().NamespaceId,
-			Execution: commonpb.WorkflowExecution{
-				WorkflowId: mutableState.GetExecutionInfo().WorkflowId,
-				RunId:      mutableState.GetExecutionState().RunId,
-			},
+			WorkflowID:  mutableState.GetExecutionInfo().WorkflowId,
+			RunID:       mutableState.GetExecutionState().RunId,
 		})
 		switch err.(type) {
 		case nil:

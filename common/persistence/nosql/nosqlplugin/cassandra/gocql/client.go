@@ -38,6 +38,8 @@ import (
 
 	"go.temporal.io/server/common/auth"
 	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/common/debug"
+	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/translator"
 	"go.temporal.io/server/common/resolver"
 )
 
@@ -49,7 +51,19 @@ func NewCassandraCluster(
 	for _, host := range parseHosts(cfg.Hosts) {
 		resolvedHosts = append(resolvedHosts, resolver.Resolve(host)...)
 	}
+
 	cluster := gocql.NewCluster(resolvedHosts...)
+	if err := ConfigureCassandraCluster(cfg, cluster); err != nil {
+		return nil, err
+	}
+
+	return cluster, nil
+}
+
+// Modifies the input cluster config in place.
+//
+//nolint:revive // cognitive complexity 61 (> max enabled 25)
+func ConfigureCassandraCluster(cfg config.Cassandra, cluster *gocql.ClusterConfig) error {
 	cluster.ProtoVersion = 4
 	if cfg.Port > 0 {
 		cluster.Port = cfg.Port
@@ -68,15 +82,15 @@ func NewCassandraCluster(
 	}
 	if cfg.TLS != nil && cfg.TLS.Enabled {
 		if cfg.TLS.CertData != "" && cfg.TLS.CertFile != "" {
-			return nil, errors.New("Cannot specify both certData and certFile properties")
+			return errors.New("only one of certData or certFile properties should be specified")
 		}
 
 		if cfg.TLS.KeyData != "" && cfg.TLS.KeyFile != "" {
-			return nil, errors.New("Cannot specify both keyData and keyFile properties")
+			return errors.New("only one of keyData or keyFile properties should be specified")
 		}
 
 		if cfg.TLS.CaData != "" && cfg.TLS.CaFile != "" {
-			return nil, errors.New("Cannot specify both caData and caFile properties")
+			return errors.New("only one of caData or caFile properties should be specified")
 		}
 
 		cluster.SslOpts = &gocql.SslOptions{
@@ -92,31 +106,31 @@ func NewCassandraCluster(
 		if cfg.TLS.CertFile != "" {
 			certBytes, err = os.ReadFile(cfg.TLS.CertFile)
 			if err != nil {
-				return nil, fmt.Errorf("error reading client certificate file: %w", err)
+				return fmt.Errorf("error reading client certificate file: %w", err)
 			}
 		} else if cfg.TLS.CertData != "" {
 			certBytes, err = base64.StdEncoding.DecodeString(cfg.TLS.CertData)
 			if err != nil {
-				return nil, fmt.Errorf("client certificate could not be decoded: %w", err)
+				return fmt.Errorf("client certificate could not be decoded: %w", err)
 			}
 		}
 
 		if cfg.TLS.KeyFile != "" {
 			keyBytes, err = os.ReadFile(cfg.TLS.KeyFile)
 			if err != nil {
-				return nil, fmt.Errorf("error reading client certificate private key file: %w", err)
+				return fmt.Errorf("error reading client certificate private key file: %w", err)
 			}
 		} else if cfg.TLS.KeyData != "" {
 			keyBytes, err = base64.StdEncoding.DecodeString(cfg.TLS.KeyData)
 			if err != nil {
-				return nil, fmt.Errorf("client certificate private key could not be decoded: %w", err)
+				return fmt.Errorf("client certificate private key could not be decoded: %w", err)
 			}
 		}
 
 		if len(certBytes) > 0 {
 			clientCert, err := tls.X509KeyPair(certBytes, keyBytes)
 			if err != nil {
-				return nil, fmt.Errorf("unable to generate x509 key pair: %w", err)
+				return fmt.Errorf("unable to generate x509 key pair: %w", err)
 			}
 
 			cluster.SslOpts.Certificates = []tls.Certificate{clientCert}
@@ -126,10 +140,10 @@ func NewCassandraCluster(
 			cluster.SslOpts.RootCAs = x509.NewCertPool()
 			pem, err := base64.StdEncoding.DecodeString(cfg.TLS.CaData)
 			if err != nil {
-				return nil, fmt.Errorf("caData could not be decoded: %w", err)
+				return fmt.Errorf("caData could not be decoded: %w", err)
 			}
 			if !cluster.SslOpts.RootCAs.AppendCertsFromPEM(pem) {
-				return nil, errors.New("failed to load decoded CA Cert as PEM")
+				return errors.New("failed to load decoded CA Cert as PEM")
 			}
 		}
 	}
@@ -142,8 +156,8 @@ func NewCassandraCluster(
 		cluster.Timeout = cfg.ConnectTimeout
 		cluster.ConnectTimeout = cfg.ConnectTimeout
 	} else {
-		cluster.Timeout = 10 * time.Second
-		cluster.ConnectTimeout = 10 * time.Second
+		cluster.Timeout = 10 * time.Second * debug.TimeoutMultiplier
+		cluster.ConnectTimeout = 10 * time.Second * debug.TimeoutMultiplier
 	}
 
 	cluster.ProtoVersion = 4
@@ -158,18 +172,19 @@ func NewCassandraCluster(
 	}
 
 	cluster.PoolConfig.HostSelectionPolicy = gocql.TokenAwareHostPolicy(gocql.RoundRobinHostPolicy())
-	return cluster, nil
-}
 
-// regionHostFilter returns a gocql host filter for the given region name
-func regionHostFilter(region string) gocql.HostFilter {
-	return gocql.HostFilterFunc(func(host *gocql.HostInfo) bool {
-		applicationRegion := region
-		if len(host.DataCenter()) < 3 {
-			return false
+	if cfg.AddressTranslator != nil && cfg.AddressTranslator.Translator != "" {
+		addressTranslator, err := translator.LookupTranslator(cfg.AddressTranslator.Translator)
+		if err != nil {
+			return err
 		}
-		return host.DataCenter()[:3] == applicationRegion
-	})
+		cluster.AddressTranslator, err = addressTranslator.GetTranslator(&cfg)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 // parseHosts returns parses a list of hosts separated by comma

@@ -27,8 +27,11 @@ package tasks
 import (
 	"time"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/definition"
 )
+
+var _ Task = (*HistoryReplicationTask)(nil)
 
 type (
 	HistoryReplicationTask struct {
@@ -38,16 +41,16 @@ type (
 		FirstEventID        int64
 		NextEventID         int64
 		Version             int64
-		BranchToken         []byte
-		NewRunBranchToken   []byte
+		// deprecated
+		BranchToken []byte
+		// deprecated
+		NewRunBranchToken []byte
+		NewRunID          string
 	}
 )
 
 func (a *HistoryReplicationTask) GetKey() Key {
-	return Key{
-		FireTime: time.Unix(0, 0),
-		TaskID:   a.TaskID,
-	}
+	return NewImmediateKey(a.TaskID)
 }
 
 func (a *HistoryReplicationTask) GetVersion() int64 {
@@ -72,4 +75,12 @@ func (a *HistoryReplicationTask) GetVisibilityTime() time.Time {
 
 func (a *HistoryReplicationTask) SetVisibilityTime(timestamp time.Time) {
 	a.VisibilityTimestamp = timestamp
+}
+
+func (a *HistoryReplicationTask) GetCategory() Category {
+	return CategoryReplication
+}
+
+func (a *HistoryReplicationTask) GetType() enumsspb.TaskType {
+	return enumsspb.TASK_TYPE_REPLICATION_HISTORY
 }

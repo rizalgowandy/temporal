@@ -71,6 +71,7 @@ func updateSchema(cli *cli.Context, logger log.Logger) error {
 	conn, err := NewConnection(cfg)
 	if err != nil {
 		logger.Error("Unable to connect to SQL database.", tag.Error(err))
+		return err
 	}
 	defer conn.Close()
 	if err := schema.Update(cli, conn, logger); err != nil {
@@ -87,12 +88,8 @@ func createDatabase(cli *cli.Context, logger log.Logger) error {
 		logger.Error("Unable to read config.", tag.Error(schema.NewConfigError(err.Error())))
 		return err
 	}
-	database := cli.String(schema.CLIOptDatabase)
-	if database == "" {
-		logger.Error("Unable to read config.", tag.Error(schema.NewConfigError("missing "+flag(schema.CLIOptDatabase)+" argument ")))
-		return err
-	}
-	err = DoCreateDatabase(cfg, database)
+	defaultDb := cli.String(schema.CLIOptDefaultDb)
+	err = DoCreateDatabase(cfg, defaultDb)
 	if err != nil {
 		logger.Error("Unable to create SQL database.", tag.Error(err))
 		return err
@@ -100,14 +97,15 @@ func createDatabase(cli *cli.Context, logger log.Logger) error {
 	return nil
 }
 
-func DoCreateDatabase(cfg *config.SQL, name string) error {
-	cfg.DatabaseName = ""
+func DoCreateDatabase(cfg *config.SQL, defaultDb string) error {
+	dbToCreate := cfg.DatabaseName
+	cfg.DatabaseName = defaultDb
 	conn, err := NewConnection(cfg)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
-	return conn.CreateDatabase(name)
+	return conn.CreateDatabase(dbToCreate)
 }
 
 // dropDatabase drops a sql database
@@ -117,25 +115,23 @@ func dropDatabase(cli *cli.Context, logger log.Logger) error {
 		logger.Error("Unable to read config.", tag.Error(schema.NewConfigError(err.Error())))
 		return err
 	}
-	database := cli.String(schema.CLIOptDatabase)
-	if database == "" {
-		logger.Error("Unable to read config.", tag.Error(schema.NewConfigError("missing "+flag(schema.CLIOptDatabase)+" argument ")))
-		return err
-	}
-	err = DoDropDatabase(cfg, database)
+	defaultDb := cli.String(schema.CLIOptDefaultDb)
+	err = DoDropDatabase(cfg, defaultDb)
 	if err != nil {
 		logger.Error("Unable to drop SQL database.", tag.Error(err))
+		return err
 	}
 	return nil
 }
 
-func DoDropDatabase(cfg *config.SQL, name string) error {
-	cfg.DatabaseName = ""
+func DoDropDatabase(cfg *config.SQL, defaultDb string) error {
+	dbToDrop := cfg.DatabaseName
+	cfg.DatabaseName = defaultDb
 	conn, err := NewConnection(cfg)
 	if err != nil {
 		return err
 	}
-	err = conn.DropDatabase(name)
+	err = conn.DropDatabase(dbToDrop)
 	if err != nil {
 		return err
 	}

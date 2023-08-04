@@ -25,6 +25,7 @@
 package cassandra
 
 import (
+	"context"
 	"time"
 
 	"go.temporal.io/server/common/log"
@@ -39,10 +40,7 @@ import (
 // R represents row type in executions table, valid values are:
 // R = {Shard = 1, Execution = 2, Transfer = 3, Timer = 4, Replication = 5}
 const (
-	// Special Namespaces related constants
-	emptyNamespaceID = "10000000-0000-f000-f000-000000000000"
 	// Special Run IDs
-	emptyRunID     = "30000000-0000-f000-f000-000000000000"
 	permanentRunID = "30000000-0000-f000-f000-000000000001"
 	// Row Constants for Shard Row
 	rowTypeShardNamespaceID = "10000000-1000-f000-f000-000000000000"
@@ -64,17 +62,16 @@ const (
 	rowTypeVisibilityTaskNamespaceID = "10000000-6000-f000-f000-000000000000"
 	rowTypeVisibilityTaskWorkflowID  = "20000000-6000-f000-f000-000000000000"
 	rowTypeVisibilityTaskRunID       = "30000000-6000-f000-f000-000000000000"
-	// Row constants for TieredStorage task row.
-	rowTypeTieredStorageTaskNamespaceID = "10000000-7000-f000-f000-000000000000"
-	rowTypeTieredStorageTaskWorkflowID  = "20000000-7000-f000-f000-000000000000"
-	rowTypeTieredStorageTaskRunID       = "30000000-7000-f000-f000-000000000000"
 	// Row Constants for Replication Task DLQ Row. Source cluster name will be used as WorkflowID.
 	rowTypeDLQNamespaceID = "10000000-6000-f000-f000-000000000000"
 	rowTypeDLQRunID       = "30000000-6000-f000-f000-000000000000"
+	// Row constants for History task row.
+	rowTypeHistoryTaskNamespaceID = "10000000-8000-f000-f000-000000000000"
+	rowTypeHistoryTaskWorkflowID  = "20000000-8000-f000-f000-000000000000"
+	rowTypeHistoryTaskRunID       = "30000000-8000-f000-f000-000000000000"
 	// Special TaskId constants
 	rowTypeExecutionTaskID = int64(-10)
 	rowTypeShardTaskID     = int64(-11)
-	emptyInitiatedID       = int64(-7)
 )
 
 const (
@@ -86,7 +83,8 @@ const (
 	rowTypeReplicationTask
 	rowTypeDLQ
 	rowTypeVisibilityTask
-	rowTypeTieredStorageTask
+	// NOTE: the row type for history task is the task category ID
+	// rowTypeHistoryTask
 )
 
 const (
@@ -103,9 +101,8 @@ const (
 )
 
 var (
-	defaultDateTime               = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
-	defaultVisibilityTimestamp    = p.UnixMilliseconds(defaultDateTime)
-	defaultTieredStorageTimestamp = p.UnixMilliseconds(defaultDateTime)
+	defaultDateTime            = time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	defaultVisibilityTimestamp = p.UnixMilliseconds(defaultDateTime)
 )
 
 type (
@@ -130,54 +127,57 @@ func NewExecutionStore(
 }
 
 func (d *ExecutionStore) CreateWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalCreateWorkflowExecutionRequest,
 ) (*p.InternalCreateWorkflowExecutionResponse, error) {
 	for _, req := range request.NewWorkflowNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return nil, err
 		}
 	}
 
-	return d.MutableStateStore.CreateWorkflowExecution(request)
+	return d.MutableStateStore.CreateWorkflowExecution(ctx, request)
 }
 
 func (d *ExecutionStore) UpdateWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalUpdateWorkflowExecutionRequest,
 ) error {
 	for _, req := range request.UpdateWorkflowNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.NewWorkflowNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 
-	return d.MutableStateStore.UpdateWorkflowExecution(request)
+	return d.MutableStateStore.UpdateWorkflowExecution(ctx, request)
 }
 
 func (d *ExecutionStore) ConflictResolveWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalConflictResolveWorkflowExecutionRequest,
 ) error {
 	for _, req := range request.CurrentWorkflowEventsNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.ResetWorkflowEventsNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.NewWorkflowEventsNewEvents {
-		if err := d.AppendHistoryNodes(req); err != nil {
+		if err := d.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 
-	return d.MutableStateStore.ConflictResolveWorkflowExecution(request)
+	return d.MutableStateStore.ConflictResolveWorkflowExecution(ctx, request)
 }
 
 func (d *ExecutionStore) GetName() string {

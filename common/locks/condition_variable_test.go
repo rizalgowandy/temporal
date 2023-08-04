@@ -40,7 +40,7 @@ type (
 		suite.Suite
 
 		lock sync.Locker
-		cv   ConditionVariable
+		cv   *ConditionVariableImpl
 	}
 )
 
@@ -67,6 +67,34 @@ func (s *conditionVariableSuite) TearDownTest() {
 
 }
 
+func (s *conditionVariableSuite) TestChannelSize_New() {
+	s.testChannelSize(s.cv.channel)
+}
+
+func (s *conditionVariableSuite) TestChannelSize_Broadcast() {
+	s.cv.Broadcast()
+	s.testChannelSize(s.cv.channel)
+}
+
+func (s *conditionVariableSuite) testChannelSize(
+	channel chan struct{},
+) {
+	// assert channel size == 1
+	select {
+	case channel <- struct{}{}:
+		// noop
+	default:
+		s.Fail("conditional variable size should be 1")
+	}
+
+	select {
+	case channel <- struct{}{}:
+		s.Fail("conditional variable size should be 1")
+	default:
+		// noop
+	}
+}
+
 func (s *conditionVariableSuite) TestSignal() {
 	signalWaitGroup := sync.WaitGroup{}
 	signalWaitGroup.Add(1)
@@ -87,6 +115,7 @@ func (s *conditionVariableSuite) TestSignal() {
 
 	signalWaitGroup.Wait()
 	s.lock.Lock()
+	func() {}()
 	s.lock.Unlock()
 	s.cv.Signal()
 	waitGroup.Wait()
@@ -113,6 +142,7 @@ func (s *conditionVariableSuite) TestInterrupt() {
 
 	interruptWaitGroup.Wait()
 	s.lock.Lock()
+	func() {}()
 	s.lock.Unlock()
 	interruptChan <- struct{}{}
 	waitGroup.Wait()
@@ -142,6 +172,7 @@ func (s *conditionVariableSuite) TestBroadcast() {
 
 	broadcastWaitGroup.Wait()
 	s.lock.Lock()
+	func() {}()
 	s.lock.Unlock()
 	s.cv.Broadcast()
 	waitGroup.Wait()
@@ -201,6 +232,9 @@ func (s *conditionVariableSuite) TestCase_ProducerConsumer() {
 			remainingToken += consume
 		}
 		randSignalBroadcast(notifyProducerCV, signalRatio)
+		if tokens > 0 {
+			randSignalBroadcast(notifyConsumerCV, signalRatio)
+		}
 	}
 
 	for i := 0; i < numConsumer; i++ {

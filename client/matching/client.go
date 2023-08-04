@@ -22,27 +22,33 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// Generates all three generated files in this package:
+//go:generate go run ../../cmd/tools/rpcwrappers -service matching
+
 package matching
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
+	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"google.golang.org/grpc"
 
 	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/debug"
 	"go.temporal.io/server/common/namespace"
 )
 
 var _ matchingservice.MatchingServiceClient = (*clientImpl)(nil)
 
 const (
-	// DefaultTimeout is the default timeout used to make calls
-	DefaultTimeout = time.Minute
-	// DefaultLongPollTimeout is the long poll default timeout used to make calls
-	DefaultLongPollTimeout = time.Minute * 2
+	// DefaultTimeout is the max timeout for regular calls
+	DefaultTimeout = time.Minute * debug.TimeoutMultiplier
+	// DefaultLongPollTimeout is the max timeout for long poll calls
+	DefaultLongPollTimeout = time.Minute * 5 * debug.TimeoutMultiplier
 )
 
 type clientImpl struct {
@@ -52,7 +58,7 @@ type clientImpl struct {
 	loadBalancer    LoadBalancer
 }
 
-// NewClient creates a new history service TChannel client
+// NewClient creates a new history service gRPC client
 func NewClient(
 	timeout time.Duration,
 	longPollTimeout time.Duration,
@@ -78,7 +84,11 @@ func (c *clientImpl) AddActivityTask(
 		request.GetForwardedSource(),
 	)
 	request.TaskQueue.Name = partition
-	client, err := c.getClientForTaskqueue(partition)
+	client, err := c.getClientForTaskqueue(
+		request.NamespaceId,
+		request.TaskQueue,
+		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +108,11 @@ func (c *clientImpl) AddWorkflowTask(
 		request.GetForwardedSource(),
 	)
 	request.TaskQueue.Name = partition
-	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
+	client, err := c.getClientForTaskqueue(
+		request.NamespaceId,
+		request.TaskQueue,
+		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +132,11 @@ func (c *clientImpl) PollActivityTaskQueue(
 		request.GetForwardedSource(),
 	)
 	request.PollRequest.TaskQueue.Name = partition
-	client, err := c.getClientForTaskqueue(request.PollRequest.TaskQueue.GetName())
+	client, err := c.getClientForTaskqueue(
+		request.NamespaceId,
+		request.PollRequest.TaskQueue,
+		enumspb.TASK_QUEUE_TYPE_ACTIVITY,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -138,7 +156,11 @@ func (c *clientImpl) PollWorkflowTaskQueue(
 		request.GetForwardedSource(),
 	)
 	request.PollRequest.TaskQueue.Name = partition
-	client, err := c.getClientForTaskqueue(request.PollRequest.TaskQueue.GetName())
+	client, err := c.getClientForTaskqueue(
+		request.NamespaceId,
+		request.PollRequest.TaskQueue,
+		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -155,53 +177,17 @@ func (c *clientImpl) QueryWorkflow(ctx context.Context, request *matchingservice
 		request.GetForwardedSource(),
 	)
 	request.TaskQueue.Name = partition
-	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
+	client, err := c.getClientForTaskqueue(
+		request.NamespaceId,
+		request.TaskQueue,
+		enumspb.TASK_QUEUE_TYPE_WORKFLOW,
+	)
 	if err != nil {
 		return nil, err
 	}
 	ctx, cancel := c.createContext(ctx)
 	defer cancel()
 	return client.QueryWorkflow(ctx, request, opts...)
-}
-
-func (c *clientImpl) RespondQueryTaskCompleted(ctx context.Context, request *matchingservice.RespondQueryTaskCompletedRequest, opts ...grpc.CallOption) (*matchingservice.RespondQueryTaskCompletedResponse, error) {
-	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := c.createContext(ctx)
-	defer cancel()
-	return client.RespondQueryTaskCompleted(ctx, request, opts...)
-}
-
-func (c *clientImpl) CancelOutstandingPoll(ctx context.Context, request *matchingservice.CancelOutstandingPollRequest, opts ...grpc.CallOption) (*matchingservice.CancelOutstandingPollResponse, error) {
-	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := c.createContext(ctx)
-	defer cancel()
-	return client.CancelOutstandingPoll(ctx, request, opts...)
-}
-
-func (c *clientImpl) DescribeTaskQueue(ctx context.Context, request *matchingservice.DescribeTaskQueueRequest, opts ...grpc.CallOption) (*matchingservice.DescribeTaskQueueResponse, error) {
-	client, err := c.getClientForTaskqueue(request.DescRequest.TaskQueue.GetName())
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := c.createContext(ctx)
-	defer cancel()
-	return client.DescribeTaskQueue(ctx, request, opts...)
-}
-
-func (c *clientImpl) ListTaskQueuePartitions(ctx context.Context, request *matchingservice.ListTaskQueuePartitionsRequest, opts ...grpc.CallOption) (*matchingservice.ListTaskQueuePartitionsResponse, error) {
-	client, err := c.getClientForTaskqueue(request.TaskQueue.GetName())
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := c.createContext(ctx)
-	defer cancel()
-	return client.ListTaskQueuePartitions(ctx, request, opts...)
 }
 
 func (c *clientImpl) createContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -212,7 +198,12 @@ func (c *clientImpl) createLongPollContext(parent context.Context) (context.Cont
 	return context.WithTimeout(parent, c.longPollTimeout)
 }
 
-func (c *clientImpl) getClientForTaskqueue(key string) (matchingservice.MatchingServiceClient, error) {
+func (c *clientImpl) getClientForTaskqueue(
+	namespaceID string,
+	taskQueue *taskqueuepb.TaskQueue,
+	taskQueueType enumspb.TaskQueueType,
+) (matchingservice.MatchingServiceClient, error) {
+	key := fmt.Sprintf("%s:%s:%d", namespaceID, taskQueue.Name, int(taskQueueType))
 	client, err := c.clients.GetClientForKey(key)
 	if err != nil {
 		return nil, err

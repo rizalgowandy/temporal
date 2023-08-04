@@ -57,9 +57,16 @@ func (m *SqlStore) GetName() string {
 	return m.Db.PluginName()
 }
 
+func (m *SqlStore) GetDbName() string {
+	return m.Db.DbName()
+}
+
 func (m *SqlStore) Close() {
 	if m.Db != nil {
-		m.Db.Close()
+		err := m.Db.Close()
+		if err != nil {
+			m.logger.Error("Error closing SQL database", tag.Error(err))
+		}
 	}
 }
 
@@ -121,7 +128,7 @@ func serializePageToken(offset int64) []byte {
 
 func deserializePageToken(payload []byte) (int64, error) {
 	if len(payload) != 8 {
-		return 0, fmt.Errorf("Invalid token of %v length", len(payload))
+		return 0, fmt.Errorf("invalid token of %v length", len(payload))
 	}
 	return int64(binary.LittleEndian.Uint64(payload)), nil
 }

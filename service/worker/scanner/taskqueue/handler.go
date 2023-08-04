@@ -29,12 +29,11 @@ import (
 	"sync/atomic"
 	"time"
 
-	persistencespb "go.temporal.io/server/api/persistence/v1"
 	"go.temporal.io/server/common/log/tag"
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/primitives/timestamp"
+	"go.temporal.io/server/service/matching"
 	"go.temporal.io/server/service/worker/scanner/executor"
-	// taskqueuepb "go.temporal.io/api/taskqueue/v1"
 )
 
 type handlerStatus = executor.TaskStatus
@@ -54,14 +53,14 @@ const scannerTaskQueuePrefix = "temporal-sys-tl-scanner"
 // with the assumption that the executor will schedule this task later
 //
 // Each loop of the handler proceeds as follows
-//    - Retrieve the next batch of tasks sorted by task_id for this task queue from persistence
-//    - If there are 0 tasks for this task queue, try deleting the task queue if its idle
-//    - If any of the tasks in the batch isn't expired, we are done. Since tasks are retrieved
-//      in sorted order, if one of the tasks isn't expired, chances are, none of the tasks above
-//      it are expired as well - so, we give up and wait for the next run
-//    - Delete the entire batch of tasks
-//    - If the number of tasks retrieved is less than batchSize, there are no more tasks in the task queue
-//      Try deleting the task queue if its idle
+//   - Retrieve the next batch of tasks sorted by task_id for this task queue from persistence
+//   - If there are 0 tasks for this task queue, try deleting the task queue if its idle
+//   - If any of the tasks in the batch isn't expired, we are done. Since tasks are retrieved
+//     in sorted order, if one of the tasks isn't expired, chances are, none of the tasks above
+//     it are expired as well - so, we give up and wait for the next run
+//   - Delete the entire batch of tasks
+//   - If the number of tasks retrieved is less than batchSize, there are no more tasks in the task queue
+//     Try deleting the task queue if its idle
 func (s *Scavenger) deleteHandler(key *p.TaskQueueKey, state *taskQueueState) handlerStatus {
 	var err error
 	var nProcessed, nDeleted int
@@ -69,7 +68,7 @@ func (s *Scavenger) deleteHandler(key *p.TaskQueueKey, state *taskQueueState) ha
 	defer func() { s.deleteHandlerLog(key, state, nProcessed, nDeleted, err) }()
 
 	for nProcessed < maxTasksPerJob {
-		resp, err1 := s.getTasks(key, taskBatchSize)
+		resp, err1 := s.getTasks(s.lifecycleCtx, key, taskBatchSize)
 		if err1 != nil {
 			err = err1
 			return handlerStatusErr
@@ -83,13 +82,13 @@ func (s *Scavenger) deleteHandler(key *p.TaskQueueKey, state *taskQueueState) ha
 
 		for _, task := range resp.Tasks {
 			nProcessed++
-			if !IsTaskExpired(task) {
+			if !matching.IsTaskExpired(task) {
 				return handlerStatusDone
 			}
 		}
 
-		taskID := resp.Tasks[nTasks-1].GetTaskId()
-		if _, err = s.completeTasks(key, taskID, nTasks); err != nil {
+		lastTaskID := resp.Tasks[nTasks-1].GetTaskId()
+		if _, err = s.completeTasks(s.lifecycleCtx, key, lastTaskID+1, nTasks); err != nil {
 			return handlerStatusErr
 		}
 
@@ -104,7 +103,7 @@ func (s *Scavenger) deleteHandler(key *p.TaskQueueKey, state *taskQueueState) ha
 }
 
 func (s *Scavenger) tryDeleteTaskQueue(key *p.TaskQueueKey, state *taskQueueState) {
-	if strings.HasPrefix(key.Name, scannerTaskQueuePrefix) {
+	if strings.HasPrefix(key.TaskQueueName, scannerTaskQueuePrefix) {
 		return // avoid deleting our own task queue
 	}
 
@@ -121,12 +120,12 @@ func (s *Scavenger) tryDeleteTaskQueue(key *p.TaskQueueKey, state *taskQueueStat
 	//     of idle timeout). If any new host has to take ownership of this at this time, it can only
 	//     do so by updating the rangeID
 	//   - deleteTaskQueue is a conditional delete where condition is the rangeID
-	if err := s.deleteTaskQueue(key, state.rangeID); err != nil {
+	if err := s.deleteTaskQueue(s.lifecycleCtx, key, state.rangeID); err != nil {
 		s.logger.Error("deleteTaskQueue error", tag.Error(err))
 		return
 	}
 	atomic.AddInt64(&s.stats.taskqueue.nDeleted, 1)
-	s.logger.Info("taskqueue deleted", tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.Name), tag.WorkflowTaskQueueType(key.TaskType))
+	s.logger.Info("taskqueue deleted", tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.TaskQueueName), tag.WorkflowTaskQueueType(key.TaskQueueType))
 }
 
 func (s *Scavenger) deleteHandlerLog(key *p.TaskQueueKey, state *taskQueueState, nProcessed int, nDeleted int, err error) {
@@ -134,22 +133,11 @@ func (s *Scavenger) deleteHandlerLog(key *p.TaskQueueKey, state *taskQueueState,
 	atomic.AddInt64(&s.stats.task.nProcessed, int64(nProcessed))
 	if err != nil {
 		s.logger.Error("scavenger.deleteHandler processed.",
-			tag.Error(err), tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.Name), tag.WorkflowTaskQueueType(key.TaskType), tag.NumberProcessed(nProcessed), tag.NumberDeleted(nDeleted))
+			tag.Error(err), tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.TaskQueueName), tag.WorkflowTaskQueueType(key.TaskQueueType), tag.NumberProcessed(nProcessed), tag.NumberDeleted(nDeleted))
 		return
 	}
 	if nProcessed > 0 {
 		s.logger.Info("scavenger.deleteHandler processed.",
-			tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.Name), tag.WorkflowTaskQueueType(key.TaskType), tag.NumberProcessed(nProcessed), tag.NumberDeleted(nDeleted))
+			tag.WorkflowNamespaceID(key.NamespaceID), tag.WorkflowTaskQueueName(key.TaskQueueName), tag.WorkflowTaskQueueType(key.TaskQueueType), tag.NumberProcessed(nProcessed), tag.NumberDeleted(nDeleted))
 	}
-}
-
-// TODO https://github.com/temporalio/temporal/issues/1021
-//  there should be more validation logic here
-//  1. if task has valid TTL -> TTL reached -> delete
-//  2. if task has 0 TTL / no TTL -> logic need to additionally check if corresponding workflow still exists
-func IsTaskExpired(t *persistencespb.AllocatedTaskInfo) bool {
-	tExpiry := timestamp.TimeValue(t.Data.ExpiryTime)
-	tEpoch := time.Unix(0, 0).UTC()
-	tNow := time.Now().UTC()
-	return tExpiry.After(tEpoch) && tNow.After(tExpiry)
 }

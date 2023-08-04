@@ -25,20 +25,20 @@
 package worker
 
 import (
+	"context"
 	"math/rand"
-	"sync/atomic"
 	"time"
 
-	"github.com/uber-go/tally/v4"
 	"go.temporal.io/api/serviceerror"
-	sdkclient "go.temporal.io/sdk/client"
+	"go.temporal.io/server/common"
 
 	"go.temporal.io/server/api/historyservice/v1"
+	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/client"
-	"go.temporal.io/server/common"
 	carchiver "go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/archiver/provider"
 	"go.temporal.io/server/common/cluster"
+	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
@@ -47,8 +47,12 @@ import (
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
 	persistenceClient "go.temporal.io/server/common/persistence/client"
+	"go.temporal.io/server/common/persistence/visibility"
+	"go.temporal.io/server/common/persistence/visibility/manager"
 	esclient "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/service/worker/archiver"
 	"go.temporal.io/server/service/worker/batcher"
 	"go.temporal.io/server/service/worker/parentclosepolicy"
@@ -64,16 +68,17 @@ type (
 		logger                 log.Logger
 		archivalMetadata       carchiver.ArchivalMetadata
 		clusterMetadata        cluster.Metadata
-		metricsClient          metrics.Client
 		clientBean             client.Bean
 		clusterMetadataManager persistence.ClusterMetadataManager
 		metadataManager        persistence.MetadataManager
-		hostInfo               *membership.HostInfo
+		membershipMonitor      membership.Monitor
+		hostInfo               membership.HostInfo
 		executionManager       persistence.ExecutionManager
 		taskManager            persistence.TaskManager
 		historyClient          historyservice.HistoryServiceClient
 		namespaceRegistry      namespace.Registry
 		workerServiceResolver  membership.ServiceResolver
+		visibilityManager      manager.VisibilityManager
 
 		archiverProvider provider.ArchiverProvider
 
@@ -81,41 +86,53 @@ type (
 
 		persistenceBean persistenceClient.Bean
 
-		membershipMonitor membership.Monitor
+		metricsHandler metrics.Handler
 
-		metricsScope tally.Scope
+		sdkClientFactory sdk.ClientFactory
+		esClient         esclient.Client
+		config           *Config
 
-		status    int32
-		stopC     chan struct{}
-		sdkClient sdkclient.Client
-		esClient  esclient.Client
-		config    *Config
-
-		manager *workerManager
+		workerManager             *workerManager
+		perNamespaceWorkerManager *perNamespaceWorkerManager
+		scanner                   *scanner.Scanner
+		matchingClient            matchingservice.MatchingServiceClient
 	}
 
 	// Config contains all the service config for worker
 	Config struct {
-		ArchiverConfig                *archiver.Config
-		ScannerCfg                    *scanner.Config
-		ParentCloseCfg                *parentclosepolicy.Config
-		BatcherCfg                    *batcher.Config
-		ThrottledLogRPS               dynamicconfig.IntPropertyFn
-		PersistenceMaxQPS             dynamicconfig.IntPropertyFn
-		PersistenceGlobalMaxQPS       dynamicconfig.IntPropertyFn
-		EnableBatcher                 dynamicconfig.BoolPropertyFn
-		EnableParentClosePolicyWorker dynamicconfig.BoolPropertyFn
+		ArchiverConfig                        *archiver.Config
+		ScannerCfg                            *scanner.Config
+		ParentCloseCfg                        *parentclosepolicy.Config
+		ThrottledLogRPS                       dynamicconfig.IntPropertyFn
+		PersistenceMaxQPS                     dynamicconfig.IntPropertyFn
+		PersistenceGlobalMaxQPS               dynamicconfig.IntPropertyFn
+		PersistenceNamespaceMaxQPS            dynamicconfig.IntPropertyFnWithNamespaceFilter
+		PersistencePerShardNamespaceMaxQPS    dynamicconfig.IntPropertyFnWithNamespaceFilter
+		EnablePersistencePriorityRateLimiting dynamicconfig.BoolPropertyFn
+		PersistenceDynamicRateLimitingParams  dynamicconfig.MapPropertyFn
+		OperatorRPSRatio                      dynamicconfig.FloatPropertyFn
+		EnableBatcher                         dynamicconfig.BoolPropertyFn
+		BatcherRPS                            dynamicconfig.IntPropertyFnWithNamespaceFilter
+		BatcherConcurrency                    dynamicconfig.IntPropertyFnWithNamespaceFilter
+		EnableParentClosePolicyWorker         dynamicconfig.BoolPropertyFn
+		PerNamespaceWorkerCount               dynamicconfig.IntPropertyFnWithNamespaceFilter
+		PerNamespaceWorkerOptions             dynamicconfig.MapPropertyFnWithNamespaceFilter
+
+		VisibilityPersistenceMaxReadQPS   dynamicconfig.IntPropertyFn
+		VisibilityPersistenceMaxWriteQPS  dynamicconfig.IntPropertyFn
+		EnableReadFromSecondaryVisibility dynamicconfig.BoolPropertyFnWithNamespaceFilter
+		VisibilityDisableOrderByClause    dynamicconfig.BoolPropertyFnWithNamespaceFilter
+		VisibilityEnableManualPagination  dynamicconfig.BoolPropertyFnWithNamespaceFilter
 	}
 )
 
 func NewService(
-	logger resource.SnTaggedLogger,
+	logger log.SnTaggedLogger,
 	serviceConfig *Config,
-	sdkClient sdkclient.Client,
+	sdkClientFactory sdk.ClientFactory,
 	esClient esclient.Client,
 	archivalMetadata carchiver.ArchivalMetadata,
 	clusterMetadata cluster.Metadata,
-	metricsClient metrics.Client,
 	clientBean client.Bean,
 	clusterMetadataManager persistence.ClusterMetadataManager,
 	namespaceRegistry namespace.Registry,
@@ -123,29 +140,29 @@ func NewService(
 	archiverProvider provider.ArchiverProvider,
 	persistenceBean persistenceClient.Bean,
 	membershipMonitor membership.Monitor,
+	hostInfoProvider membership.HostInfoProvider,
 	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
-	metricsScope tally.Scope,
+	metricsHandler metrics.Handler,
 	metadataManager persistence.MetadataManager,
 	taskManager persistence.TaskManager,
 	historyClient historyservice.HistoryServiceClient,
-	manager *workerManager,
+	workerManager *workerManager,
+	perNamespaceWorkerManager *perNamespaceWorkerManager,
+	visibilityManager manager.VisibilityManager,
+	matchingClient resource.MatchingClient,
 ) (*Service, error) {
-	workerServiceResolver, err := membershipMonitor.GetResolver(common.WorkerServiceName)
+	workerServiceResolver, err := membershipMonitor.GetResolver(primitives.WorkerService)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Service{
-		status:    common.DaemonStatusInitialized,
-		config:    serviceConfig,
-		sdkClient: sdkClient,
-		esClient:  esClient,
-		stopC:     make(chan struct{}),
-
+	s := &Service{
+		config:                    serviceConfig,
+		sdkClientFactory:          sdkClientFactory,
+		esClient:                  esClient,
 		logger:                    logger,
 		archivalMetadata:          archivalMetadata,
 		clusterMetadata:           clusterMetadata,
-		metricsClient:             metricsClient,
 		clientBean:                clientBean,
 		clusterMetadataManager:    clusterMetadataManager,
 		namespaceRegistry:         namespaceRegistry,
@@ -153,23 +170,32 @@ func NewService(
 		persistenceBean:           persistenceBean,
 		workerServiceResolver:     workerServiceResolver,
 		membershipMonitor:         membershipMonitor,
+		hostInfo:                  hostInfoProvider.HostInfo(),
 		archiverProvider:          archiverProvider,
 		namespaceReplicationQueue: namespaceReplicationQueue,
-		metricsScope:              metricsScope,
+		metricsHandler:            metricsHandler,
 		metadataManager:           metadataManager,
 		taskManager:               taskManager,
 		historyClient:             historyClient,
+		visibilityManager:         visibilityManager,
 
-		manager: manager,
-	}, nil
+		workerManager:             workerManager,
+		perNamespaceWorkerManager: perNamespaceWorkerManager,
+		matchingClient:            matchingClient,
+	}
+	if err := s.initScanner(); err != nil {
+		return nil, err
+	}
+	return s, nil
 }
 
 // NewConfig builds the new Config for worker service
-func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resource.BootstrapParams) *Config {
-	dc := dynamicconfig.NewCollection(
-		dcClient,
-		logger,
-	)
+func NewConfig(
+	dc *dynamicconfig.Collection,
+	persistenceConfig *config.Persistence,
+	visibilityStoreConfigExist bool,
+	enableReadFromES bool,
+) *Config {
 	config := &Config{
 		ArchiverConfig: &archiver.Config{
 			MaxConcurrentActivityExecutionSize: dc.GetIntProperty(
@@ -202,24 +228,7 @@ func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resourc
 				archiver.MaxArchivalIterationTimeout(),
 			),
 		},
-		BatcherCfg: &batcher.Config{
-			MaxConcurrentActivityExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerBatcherMaxConcurrentActivityExecutionSize,
-				1000,
-			),
-			MaxConcurrentWorkflowTaskExecutionSize: dc.GetIntProperty(
-				dynamicconfig.WorkerBatcherMaxConcurrentWorkflowTaskExecutionSize,
-				1000,
-			),
-			MaxConcurrentActivityTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerBatcherMaxConcurrentActivityTaskPollers,
-				4,
-			),
-			MaxConcurrentWorkflowTaskPollers: dc.GetIntProperty(
-				dynamicconfig.WorkerBatcherMaxConcurrentWorkflowTaskPollers,
-				4,
-			),
-		},
+
 		ParentCloseCfg: &parentclosepolicy.Config{
 			MaxConcurrentActivityExecutionSize: dc.GetIntProperty(
 				dynamicconfig.WorkerParentCloseMaxConcurrentActivityExecutionSize,
@@ -236,6 +245,10 @@ func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resourc
 			MaxConcurrentWorkflowTaskPollers: dc.GetIntProperty(
 				dynamicconfig.WorkerParentCloseMaxConcurrentWorkflowTaskPollers,
 				4,
+			),
+			NumParentClosePolicySystemWorkflows: dc.GetIntProperty(
+				dynamicconfig.NumParentClosePolicySystemWorkflows,
+				10,
 			),
 		},
 		ScannerCfg: &scanner.Config{
@@ -260,10 +273,14 @@ func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resourc
 				dynamicconfig.ScannerPersistenceMaxQPS,
 				100,
 			),
-			Persistence: &params.PersistenceConfig,
+			Persistence: persistenceConfig,
 			TaskQueueScannerEnabled: dc.GetBoolProperty(
 				dynamicconfig.TaskQueueScannerEnabled,
 				true,
+			),
+			BuildIdScavengerEnabled: dc.GetBoolProperty(
+				dynamicconfig.BuildIdScavengerEnabled,
+				false,
 			),
 			HistoryScannerEnabled: dc.GetBoolProperty(
 				dynamicconfig.HistoryScannerEnabled,
@@ -273,14 +290,57 @@ func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resourc
 				dynamicconfig.ExecutionsScannerEnabled,
 				false,
 			),
+			HistoryScannerDataMinAge: dc.GetDurationProperty(
+				dynamicconfig.HistoryScannerDataMinAge,
+				60*24*time.Hour,
+			),
+			HistoryScannerVerifyRetention: dc.GetBoolProperty(
+				dynamicconfig.HistoryScannerVerifyRetention,
+				true,
+			),
+			ExecutionScannerPerHostQPS: dc.GetIntProperty(
+				dynamicconfig.ExecutionScannerPerHostQPS,
+				10,
+			),
+			ExecutionScannerPerShardQPS: dc.GetIntProperty(
+				dynamicconfig.ExecutionScannerPerShardQPS,
+				1,
+			),
+			ExecutionDataDurationBuffer: dc.GetDurationProperty(
+				dynamicconfig.ExecutionDataDurationBuffer,
+				time.Hour*24*90,
+			),
+			ExecutionScannerWorkerCount: dc.GetIntProperty(
+				dynamicconfig.ExecutionScannerWorkerCount,
+				8,
+			),
+			ExecutionScannerHistoryEventIdValidator: dc.GetBoolProperty(
+				dynamicconfig.ExecutionScannerHistoryEventIdValidator,
+				true,
+			),
+			RemovableBuildIdDurationSinceDefault: dc.GetDurationProperty(
+				dynamicconfig.RemovableBuildIdDurationSinceDefault,
+				time.Hour,
+			),
+			BuildIdScavengerVisibilityRPS: dc.GetFloat64Property(
+				dynamicconfig.BuildIdScavenengerVisibilityRPS,
+				1.0,
+			),
 		},
-		EnableBatcher: dc.GetBoolProperty(
-			dynamicconfig.EnableBatcher,
-			true,
-		),
+		EnableBatcher:      dc.GetBoolProperty(dynamicconfig.EnableBatcher, true),
+		BatcherRPS:         dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherRPS, batcher.DefaultRPS),
+		BatcherConcurrency: dc.GetIntPropertyFilteredByNamespace(dynamicconfig.BatcherConcurrency, batcher.DefaultConcurrency),
 		EnableParentClosePolicyWorker: dc.GetBoolProperty(
 			dynamicconfig.EnableParentClosePolicyWorker,
 			true,
+		),
+		PerNamespaceWorkerCount: dc.GetIntPropertyFilteredByNamespace(
+			dynamicconfig.WorkerPerNamespaceWorkerCount,
+			1,
+		),
+		PerNamespaceWorkerOptions: dc.GetMapPropertyFnWithNamespaceFilter(
+			dynamicconfig.WorkerPerNamespaceWorkerOptions,
+			map[string]any{},
 		),
 		ThrottledLogRPS: dc.GetIntProperty(
 			dynamicconfig.WorkerThrottledLogRPS,
@@ -294,45 +354,46 @@ func NewConfig(logger log.Logger, dcClient dynamicconfig.Client, params *resourc
 			dynamicconfig.WorkerPersistenceGlobalMaxQPS,
 			0,
 		),
+		PersistenceNamespaceMaxQPS: dc.GetIntPropertyFilteredByNamespace(
+			dynamicconfig.WorkerPersistenceNamespaceMaxQPS,
+			0,
+		),
+		PersistencePerShardNamespaceMaxQPS: dynamicconfig.DefaultPerShardNamespaceRPSMax,
+		EnablePersistencePriorityRateLimiting: dc.GetBoolProperty(
+			dynamicconfig.WorkerEnablePersistencePriorityRateLimiting,
+			true,
+		),
+		PersistenceDynamicRateLimitingParams: dc.GetMapProperty(dynamicconfig.WorkerPersistenceDynamicRateLimitingParams, dynamicconfig.DefaultDynamicRateLimitingParams),
+		OperatorRPSRatio:                     dc.GetFloat64Property(dynamicconfig.OperatorRPSRatio, common.DefaultOperatorRPSRatio),
+
+		VisibilityPersistenceMaxReadQPS:   visibility.GetVisibilityPersistenceMaxReadQPS(dc, enableReadFromES),
+		VisibilityPersistenceMaxWriteQPS:  visibility.GetVisibilityPersistenceMaxWriteQPS(dc, enableReadFromES),
+		EnableReadFromSecondaryVisibility: visibility.GetEnableReadFromSecondaryVisibilityConfig(dc, visibilityStoreConfigExist, enableReadFromES),
+		VisibilityDisableOrderByClause:    dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityDisableOrderByClause, true),
+		VisibilityEnableManualPagination:  dc.GetBoolPropertyFnWithNamespaceFilter(dynamicconfig.VisibilityEnableManualPagination, true),
 	}
 	return config
 }
 
 // Start is called to start the service
 func (s *Service) Start() {
-	if !atomic.CompareAndSwapInt32(
-		&s.status,
-		common.DaemonStatusInitialized,
-		common.DaemonStatusStarted,
-	) {
-		return
-	}
-
 	s.logger.Info(
 		"worker starting",
 		tag.ComponentWorker,
 	)
 
-	// todo: introduce proper counter (same in resource.go)
-	s.metricsScope.Counter(metrics.RestartCount).Inc(1)
+	s.metricsHandler.Counter(metrics.RestartCount).Record(1)
 
-	s.membershipMonitor.Start()
+	s.clusterMetadata.Start()
 	s.namespaceRegistry.Start()
-
-	hostInfo, err := s.membershipMonitor.WhoAmI()
-	if err != nil {
-		s.logger.Fatal(
-			"fail to get host info from membership monitor",
-			tag.Error(err),
-		)
-	}
-	s.hostInfo = hostInfo
 
 	// The service is now started up
 	// seed the random generator once for this service
 	rand.Seed(time.Now().UnixNano())
 
-	s.ensureSystemNamespaceExists()
+	s.membershipMonitor.Start()
+
+	s.ensureSystemNamespaceExists(context.TODO())
 	s.startScanner()
 
 	if s.clusterMetadata.IsGlobalNamespaceEnabled() {
@@ -341,39 +402,36 @@ func (s *Service) Start() {
 	if s.archivalMetadata.GetHistoryConfig().ClusterConfiguredForArchival() {
 		s.startArchiver()
 	}
-	if s.config.EnableBatcher() {
-		s.startBatcher()
-	}
 	if s.config.EnableParentClosePolicyWorker() {
 		s.startParentClosePolicyProcessor()
 	}
+	if s.config.EnableBatcher() {
+		s.startBatcher()
+	}
 
-	s.manager.Start()
+	s.workerManager.Start()
+	s.perNamespaceWorkerManager.Start(
+		// TODO: get these from fx instead of passing through Start
+		s.hostInfo,
+		s.workerServiceResolver,
+	)
 
 	s.logger.Info(
 		"worker service started",
 		tag.ComponentWorker,
-		tag.Address(hostInfo.GetAddress()),
+		tag.Address(s.hostInfo.GetAddress()),
 	)
-	<-s.stopC
 }
 
 // Stop is called to stop the service
 func (s *Service) Stop() {
-	if !atomic.CompareAndSwapInt32(
-		&s.status,
-		common.DaemonStatusStarted,
-		common.DaemonStatusStopped,
-	) {
-		return
-	}
-
-	close(s.stopC)
-
-	s.manager.Stop()
+	s.scanner.Stop()
+	s.perNamespaceWorkerManager.Stop()
+	s.workerManager.Stop()
 	s.namespaceRegistry.Stop()
-	s.membershipMonitor.Stop()
+	s.clusterMetadata.Stop()
 	s.persistenceBean.Close()
+	s.visibilityManager.Close()
 
 	s.logger.Info(
 		"worker service stopped",
@@ -384,11 +442,12 @@ func (s *Service) Stop() {
 
 func (s *Service) startParentClosePolicyProcessor() {
 	params := &parentclosepolicy.BootstrapParams{
-		Config:        *s.config.ParentCloseCfg,
-		ServiceClient: s.sdkClient,
-		MetricsClient: s.metricsClient,
-		Logger:        s.logger,
-		ClientBean:    s.clientBean,
+		Config:           *s.config.ParentCloseCfg,
+		SdkClientFactory: s.sdkClientFactory,
+		MetricsHandler:   s.metricsHandler,
+		Logger:           s.logger,
+		ClientBean:       s.clientBean,
+		CurrentCluster:   s.clusterMetadata.GetCurrentClusterName(),
 	}
 	processor := parentclosepolicy.New(params)
 	if err := processor.Start(); err != nil {
@@ -400,32 +459,46 @@ func (s *Service) startParentClosePolicyProcessor() {
 }
 
 func (s *Service) startBatcher() {
-	params := &batcher.BootstrapParams{
-		Config:        *s.config.BatcherCfg,
-		ServiceClient: s.sdkClient,
-		MetricsClient: s.metricsClient,
-		Logger:        s.logger,
-		ClientBean:    s.clientBean,
-	}
-	if err := batcher.New(params).Start(); err != nil {
+	if err := batcher.New(
+		s.metricsHandler,
+		s.logger,
+		s.sdkClientFactory,
+		s.config.BatcherRPS,
+		s.config.BatcherConcurrency,
+	).Start(); err != nil {
 		s.logger.Fatal(
-			"error starting batcher",
+			"error starting batcher worker",
 			tag.Error(err),
 		)
 	}
 }
 
-func (s *Service) startScanner() {
-	sc := scanner.New(
+func (s *Service) initScanner() error {
+	currentCluster := s.clusterMetadata.GetCurrentClusterName()
+	adminClient, err := s.clientBean.GetRemoteAdminClient(currentCluster)
+	if err != nil {
+		return err
+	}
+	s.scanner = scanner.New(
 		s.logger,
 		s.config.ScannerCfg,
-		s.sdkClient,
-		s.metricsClient,
+		s.sdkClientFactory,
+		s.metricsHandler,
 		s.executionManager,
+		s.metadataManager,
+		s.visibilityManager,
 		s.taskManager,
 		s.historyClient,
+		adminClient,
+		s.matchingClient,
+		s.namespaceRegistry,
+		currentCluster,
 	)
-	if err := sc.Start(); err != nil {
+	return nil
+}
+
+func (s *Service) startScanner() {
+	if err := s.scanner.Start(); err != nil {
 		s.logger.Fatal(
 			"error starting scanner",
 			tag.Error(err),
@@ -435,6 +508,7 @@ func (s *Service) startScanner() {
 
 func (s *Service) startReplicator() {
 	namespaceReplicationTaskExecutor := namespace.NewReplicationTaskExecutor(
+		s.clusterMetadata.GetCurrentClusterName(),
 		s.metadataManager,
 		s.logger,
 	)
@@ -442,24 +516,28 @@ func (s *Service) startReplicator() {
 		s.clusterMetadata,
 		s.clientBean,
 		s.logger,
-		s.metricsClient,
+		s.metricsHandler,
 		s.hostInfo,
 		s.workerServiceResolver,
 		s.namespaceReplicationQueue,
 		namespaceReplicationTaskExecutor,
+		s.matchingClient,
+		s.namespaceRegistry,
 	)
 	msgReplicator.Start()
 }
 
 func (s *Service) startArchiver() {
+	historyClient := s.clientBean.GetHistoryClient()
 	bc := &archiver.BootstrapContainer{
-		SdkClient:        s.sdkClient,
-		MetricsClient:    s.metricsClient,
+		MetricsHandler:   s.metricsHandler,
 		Logger:           s.logger,
 		HistoryV2Manager: s.executionManager,
 		NamespaceCache:   s.namespaceRegistry,
 		Config:           s.config.ArchiverConfig,
 		ArchiverProvider: s.archiverProvider,
+		SdkClientFactory: s.sdkClientFactory,
+		HistoryClient:    historyClient,
 	}
 	clientWorker := archiver.NewClientWorker(bc)
 	if err := clientWorker.Start(); err != nil {
@@ -471,12 +549,14 @@ func (s *Service) startArchiver() {
 	}
 }
 
-func (s *Service) ensureSystemNamespaceExists() {
-	_, err := s.metadataManager.GetNamespace(&persistence.GetNamespaceRequest{Name: common.SystemLocalNamespace})
+func (s *Service) ensureSystemNamespaceExists(
+	ctx context.Context,
+) {
+	_, err := s.metadataManager.GetNamespace(ctx, &persistence.GetNamespaceRequest{Name: primitives.SystemLocalNamespace})
 	switch err.(type) {
 	case nil:
 		// noop
-	case *serviceerror.NotFound:
+	case *serviceerror.NamespaceNotFound:
 		s.logger.Fatal(
 			"temporal-system namespace does not exist",
 			tag.Error(err),
@@ -487,4 +567,9 @@ func (s *Service) ensureSystemNamespaceExists() {
 			tag.Error(err),
 		)
 	}
+}
+
+// This is intended for use by integration tests only.
+func (s *Service) RefreshPerNSWorkerManager() {
+	s.perNamespaceWorkerManager.refreshAll()
 }

@@ -25,9 +25,10 @@
 package store
 
 // -aux_files is required here due to Closeable interface being in another file.
-//go:generate mockgen -copyright_file ../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination visibility_store_mock.go -aux_files go.temporal.io/server/common/persistence=../../dataInterfaces.go
+//go:generate mockgen -copyright_file ../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination visibility_store_mock.go -aux_files go.temporal.io/server/common/persistence=../../data_interfaces.go
 
 import (
+	"context"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
@@ -42,24 +43,31 @@ type (
 	VisibilityStore interface {
 		persistence.Closeable
 		GetName() string
+		GetIndexName() string
+
+		// Validate search attributes based on the store constraints. It returns a new map containing
+		// only search attributes with valid values. If there are invalid values, an error of type
+		// VisibilityStoreInvalidValuesError wraps all invalid values errors.
+		ValidateCustomSearchAttributes(searchAttributes map[string]any) (map[string]any, error)
 
 		// Write APIs.
-		RecordWorkflowExecutionStarted(request *InternalRecordWorkflowExecutionStartedRequest) error
-		RecordWorkflowExecutionClosed(request *InternalRecordWorkflowExecutionClosedRequest) error
-		UpsertWorkflowExecution(request *InternalUpsertWorkflowExecutionRequest) error
-		DeleteWorkflowExecution(request *manager.VisibilityDeleteWorkflowExecutionRequest) error
+		RecordWorkflowExecutionStarted(ctx context.Context, request *InternalRecordWorkflowExecutionStartedRequest) error
+		RecordWorkflowExecutionClosed(ctx context.Context, request *InternalRecordWorkflowExecutionClosedRequest) error
+		UpsertWorkflowExecution(ctx context.Context, request *InternalUpsertWorkflowExecutionRequest) error
+		DeleteWorkflowExecution(ctx context.Context, request *manager.VisibilityDeleteWorkflowExecutionRequest) error
 
 		// Read APIs.
-		ListOpenWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutions(request *manager.ListWorkflowExecutionsRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListOpenWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByType(request *manager.ListWorkflowExecutionsByTypeRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListOpenWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByWorkflowID(request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByStatus(request *manager.ListClosedWorkflowExecutionsByStatusRequest) (*InternalListWorkflowExecutionsResponse, error)
-		ListWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*InternalListWorkflowExecutionsResponse, error)
-		ScanWorkflowExecutions(request *manager.ListWorkflowExecutionsRequestV2) (*InternalListWorkflowExecutionsResponse, error)
-		CountWorkflowExecutions(request *manager.CountWorkflowExecutionsRequest) (*manager.CountWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutions(ctx context.Context, request *manager.ListWorkflowExecutionsRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutions(ctx context.Context, request *manager.ListWorkflowExecutionsRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutionsByType(ctx context.Context, request *manager.ListWorkflowExecutionsByTypeRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByType(ctx context.Context, request *manager.ListWorkflowExecutionsByTypeRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutionsByWorkflowID(ctx context.Context, request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByWorkflowID(ctx context.Context, request *manager.ListWorkflowExecutionsByWorkflowIDRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByStatus(ctx context.Context, request *manager.ListClosedWorkflowExecutionsByStatusRequest) (*InternalListWorkflowExecutionsResponse, error)
+		ListWorkflowExecutions(ctx context.Context, request *manager.ListWorkflowExecutionsRequestV2) (*InternalListWorkflowExecutionsResponse, error)
+		ScanWorkflowExecutions(ctx context.Context, request *manager.ListWorkflowExecutionsRequestV2) (*InternalListWorkflowExecutionsResponse, error)
+		CountWorkflowExecutions(ctx context.Context, request *manager.CountWorkflowExecutionsRequest) (*manager.CountWorkflowExecutionsResponse, error)
+		GetWorkflowExecution(ctx context.Context, request *manager.GetWorkflowExecutionRequest) (*InternalGetWorkflowExecutionResponse, error)
 	}
 
 	// InternalWorkflowExecutionInfo is visibility info for internal response
@@ -76,6 +84,7 @@ type (
 		Memo                 *commonpb.DataBlob
 		TaskQueue            string
 		SearchAttributes     *commonpb.SearchAttributes
+		HistorySizeBytes     int64
 	}
 
 	// InternalListWorkflowExecutionsResponse is response from ListWorkflowExecutions
@@ -84,6 +93,11 @@ type (
 		// Token to read next page if there are more workflow executions beyond page size.
 		// Use this to set NextPageToken on ListWorkflowExecutionsRequest to read the next page.
 		NextPageToken []byte
+	}
+
+	// InternalGetWorkflowExecutionResponse is response from GetWorkflowExecution
+	InternalGetWorkflowExecutionResponse struct {
+		Execution *InternalWorkflowExecutionInfo
 	}
 
 	// InternalVisibilityRequestBase is a base request to visibility APIs.
@@ -111,9 +125,9 @@ type (
 	// InternalRecordWorkflowExecutionClosedRequest is request to RecordWorkflowExecutionClosed
 	InternalRecordWorkflowExecutionClosedRequest struct {
 		*InternalVisibilityRequestBase
-		CloseTime     time.Time
-		HistoryLength int64
-		Retention     *time.Duration
+		CloseTime        time.Time
+		HistoryLength    int64
+		HistorySizeBytes int64
 	}
 
 	// InternalUpsertWorkflowExecutionRequest is request to UpsertWorkflowExecution

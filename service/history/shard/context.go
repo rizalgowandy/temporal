@@ -25,11 +25,17 @@
 package shard
 
 import (
+	"context"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
-	"go.temporal.io/server/api/historyservice/v1"
 
+	"go.temporal.io/server/api/adminservice/v1"
+	clockspb "go.temporal.io/server/api/clock/v1"
+	"go.temporal.io/server/api/historyservice/v1"
+	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/clock"
 	"go.temporal.io/server/common/cluster"
 	"go.temporal.io/server/common/definition"
@@ -37,9 +43,11 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service/history/configs"
 	"go.temporal.io/server/service/history/events"
+	"go.temporal.io/server/service/history/tasks"
 )
 
 //go:generate mockgen -copyright_file ../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination context_mock.go
@@ -48,7 +56,8 @@ type (
 	// Context represents a history engine shard
 	Context interface {
 		GetShardID() int32
-		GetService() resource.Resource
+		GetRangeID() int64
+		GetOwner() string
 		GetExecutionManager() persistence.ExecutionManager
 		GetNamespaceRegistry() namespace.Registry
 		GetClusterMetadata() cluster.Metadata
@@ -56,67 +65,69 @@ type (
 		GetEventsCache() events.Cache
 		GetLogger() log.Logger
 		GetThrottledLogger() log.Logger
-		GetMetricsClient() metrics.Client
+		GetMetricsHandler() metrics.Handler
 		GetTimeSource() clock.TimeSource
 
-		GetEngine() (Engine, error)
+		GetRemoteAdminClient(string) (adminservice.AdminServiceClient, error)
+		GetHistoryClient() historyservice.HistoryServiceClient
+		GetPayloadSerializer() serialization.Serializer
 
-		GenerateTransferTaskID() (int64, error)
-		GenerateTransferTaskIDs(number int) ([]int64, error)
+		GetSearchAttributesProvider() searchattribute.Provider
+		GetSearchAttributesMapperProvider() searchattribute.MapperProvider
+		GetArchivalMetadata() archiver.ArchivalMetadata
 
-		GetTransferMaxReadLevel() int64
-		UpdateTimerMaxReadLevel(cluster string) time.Time
+		GetEngine(ctx context.Context) (Engine, error)
 
-		SetCurrentTime(cluster string, currentTime time.Time)
-		GetCurrentTime(cluster string) time.Time
-		GetLastUpdatedTime() time.Time
-		GetTimerMaxReadLevel(cluster string) time.Time
+		AssertOwnership(ctx context.Context) error
+		NewVectorClock() (*clockspb.VectorClock, error)
+		CurrentVectorClock() *clockspb.VectorClock
 
-		GetRemoteClusterAckInfo(cluster []string) (map[string]*historyservice.ShardReplicationStatusPerCluster, error)
+		GenerateTaskID() (int64, error)
+		GenerateTaskIDs(number int) ([]int64, error)
 
-		GetTransferAckLevel() int64
-		UpdateTransferAckLevel(ackLevel int64) error
-		GetTransferClusterAckLevel(cluster string) int64
-		UpdateTransferClusterAckLevel(cluster string, ackLevel int64) error
+		GetImmediateQueueExclusiveHighReadWatermark() tasks.Key
+		UpdateScheduledQueueExclusiveHighReadWatermark() (tasks.Key, error)
+		GetQueueState(category tasks.Category) (*persistencespb.QueueState, bool)
+		SetQueueState(category tasks.Category, state *persistencespb.QueueState) error
+		UpdateReplicationQueueReaderState(readerID int64, readerState *persistencespb.QueueReaderState) error
 
-		GetVisibilityAckLevel() int64
-		UpdateVisibilityAckLevel(ackLevel int64) error
-
-		GetTieredStorageAckLevel() int64
-		UpdateTieredStorageAckLevel(ackLevel int64) error
-
-		GetReplicatorAckLevel() int64
-		UpdateReplicatorAckLevel(ackLevel int64) error
 		GetReplicatorDLQAckLevel(sourceCluster string) int64
 		UpdateReplicatorDLQAckLevel(sourCluster string, ackLevel int64) error
 
-		GetClusterReplicationLevel(cluster string) int64
-		UpdateClusterReplicationLevel(cluster string, ackTaskID int64, ackTimestamp time.Time) error
+		UpdateRemoteClusterInfo(cluster string, ackTaskID int64, ackTimestamp time.Time)
+		UpdateRemoteReaderInfo(readerID int64, ackTaskID int64, ackTimestamp time.Time) error
 
-		GetTimerAckLevel() time.Time
-		UpdateTimerAckLevel(ackLevel time.Time) error
-		GetTimerClusterAckLevel(cluster string) time.Time
-		UpdateTimerClusterAckLevel(cluster string, ackLevel time.Time) error
+		SetCurrentTime(cluster string, currentTime time.Time)
+		GetCurrentTime(cluster string) time.Time
 
-		UpdateTransferFailoverLevel(failoverID string, level persistence.TransferFailoverLevel) error
-		DeleteTransferFailoverLevel(failoverID string) error
-		GetAllTransferFailoverLevels() map[string]persistence.TransferFailoverLevel
+		GetReplicationStatus(cluster []string) (map[string]*historyservice.ShardReplicationStatusPerCluster, map[string]*historyservice.HandoverNamespaceInfo, error)
 
-		UpdateTimerFailoverLevel(failoverID string, level persistence.TimerFailoverLevel) error
-		DeleteTimerFailoverLevel(failoverID string) error
-		GetAllTimerFailoverLevels() map[string]persistence.TimerFailoverLevel
+		UpdateHandoverNamespace(ns *namespace.Namespace, deletedFromDb bool)
 
-		GetNamespaceNotificationVersion() int64
-		UpdateNamespaceNotificationVersion(namespaceNotificationVersion int64) error
-		UpdateHandoverNamespaces(newNamespaces []*namespace.Namespace, maxRepTaskID int64)
+		AppendHistoryEvents(ctx context.Context, request *persistence.AppendHistoryNodesRequest, namespaceID namespace.ID, execution commonpb.WorkflowExecution) (int, error)
 
-		CreateWorkflowExecution(request *persistence.CreateWorkflowExecutionRequest) (*persistence.CreateWorkflowExecutionResponse, error)
-		UpdateWorkflowExecution(request *persistence.UpdateWorkflowExecutionRequest) (*persistence.UpdateWorkflowExecutionResponse, error)
-		ConflictResolveWorkflowExecution(request *persistence.ConflictResolveWorkflowExecutionRequest) (*persistence.ConflictResolveWorkflowExecutionResponse, error)
-		// Delete workflow execution, current workflow execution, and add task to delete visibility.
+		AddTasks(ctx context.Context, request *persistence.AddHistoryTasksRequest) error
+		AddSpeculativeWorkflowTaskTimeoutTask(task *tasks.WorkflowTaskTimeoutTask) error
+		CreateWorkflowExecution(ctx context.Context, request *persistence.CreateWorkflowExecutionRequest) (*persistence.CreateWorkflowExecutionResponse, error)
+		UpdateWorkflowExecution(ctx context.Context, request *persistence.UpdateWorkflowExecutionRequest) (*persistence.UpdateWorkflowExecutionResponse, error)
+		ConflictResolveWorkflowExecution(ctx context.Context, request *persistence.ConflictResolveWorkflowExecutionRequest) (*persistence.ConflictResolveWorkflowExecutionResponse, error)
+		SetWorkflowExecution(ctx context.Context, request *persistence.SetWorkflowExecutionRequest) (*persistence.SetWorkflowExecutionResponse, error)
+		GetCurrentExecution(ctx context.Context, request *persistence.GetCurrentExecutionRequest) (*persistence.GetCurrentExecutionResponse, error)
+		GetWorkflowExecution(ctx context.Context, request *persistence.GetWorkflowExecutionRequest) (*persistence.GetWorkflowExecutionResponse, error)
+		// DeleteWorkflowExecution add task to delete visibility, current workflow execution, and deletes workflow execution.
 		// If branchToken != nil, then delete history also, otherwise leave history.
-		DeleteWorkflowExecution(workflowKey definition.WorkflowKey, branchToken []byte, version int64) error
-		AddTasks(request *persistence.AddTasksRequest) error
-		AppendHistoryEvents(request *persistence.AppendHistoryNodesRequest, namespaceID namespace.ID, execution commonpb.WorkflowExecution) (int, error)
+		DeleteWorkflowExecution(ctx context.Context, workflowKey definition.WorkflowKey, branchToken []byte, startTime *time.Time, closeTime *time.Time, closeExecutionVisibilityTaskID int64, stage *tasks.DeleteWorkflowExecutionStage) error
+
+		UnloadForOwnershipLost()
+	}
+
+	// A ControllableContext is a Context plus other methods needed by
+	// the Controller.
+	ControllableContext interface {
+		Context
+		common.Pingable
+
+		IsValid() bool
+		FinishStop()
 	}
 )

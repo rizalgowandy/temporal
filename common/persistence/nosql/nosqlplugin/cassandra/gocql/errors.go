@@ -29,6 +29,7 @@ import (
 	"fmt"
 
 	"github.com/gocql/gocql"
+	enumspb "go.temporal.io/api/enums/v1"
 	"go.temporal.io/api/serviceerror"
 
 	"go.temporal.io/server/common/persistence"
@@ -43,46 +44,25 @@ func ConvertError(
 	case nil:
 		return nil
 	case context.DeadlineExceeded, gocql.ErrTimeoutNoResponse, gocql.ErrConnectionClosed:
-		return &persistence.TimeoutError{Msg: fmt.Sprintf("operation %v encounter %v", operation, err.Error())}
+		return &persistence.TimeoutError{Msg: fmt.Sprintf("operation %v encountered %v", operation, err.Error())}
 	case gocql.ErrNotFound:
-		return serviceerror.NewNotFound(fmt.Sprintf("operation %v encounter %v", operation, err.Error()))
+		return serviceerror.NewNotFound(fmt.Sprintf("operation %v encountered %v", operation, err.Error()))
 	}
 
 	switch v := err.(type) {
 	case *gocql.RequestErrWriteTimeout:
-		return &persistence.TimeoutError{Msg: fmt.Sprintf("operation %v encounter %v", operation, err.Error())}
+		return &persistence.TimeoutError{Msg: fmt.Sprintf("operation %v encountered %v", operation, err.Error())}
 	case gocql.RequestError:
-		if v.Code() == 0x1001 {
-			return serviceerror.NewResourceExhausted(fmt.Sprintf("operation %v encounter %v", operation, err.Error()))
+		if v.Code() == gocql.ErrCodeOverloaded {
+			return serviceerror.NewResourceExhausted(enumspb.RESOURCE_EXHAUSTED_CAUSE_SYSTEM_OVERLOADED,
+				fmt.Sprintf("operation %v encountered %v", operation, err.Error()))
 		}
-		return serviceerror.NewUnavailable(fmt.Sprintf("operation %v encounter %v", operation, err.Error()))
+		return serviceerror.NewUnavailable(fmt.Sprintf("operation %v encountered %v", operation, err.Error()))
 	default:
-		return serviceerror.NewUnavailable(fmt.Sprintf("operation %v encounter %v", operation, err.Error()))
+		return serviceerror.NewUnavailable(fmt.Sprintf("operation %v encountered %v", operation, err.Error()))
 	}
-}
-
-func IsTimeoutError(err error) bool {
-	if err == context.DeadlineExceeded {
-		return true
-	}
-	if err == gocql.ErrTimeoutNoResponse {
-		return true
-	}
-	if err == gocql.ErrConnectionClosed {
-		return true
-	}
-	_, ok := err.(*gocql.RequestErrWriteTimeout)
-	return ok
 }
 
 func IsNotFoundError(err error) bool {
 	return err == gocql.ErrNotFound
-}
-
-func IsThrottlingError(err error) bool {
-	if req, ok := err.(gocql.RequestError); ok {
-		// gocql does not expose the constant errOverloaded = 0x1001
-		return req.Code() == 0x1001
-	}
-	return false
 }

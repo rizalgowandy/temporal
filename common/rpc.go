@@ -27,7 +27,6 @@ package common
 import (
 	"net"
 
-	"github.com/uber/tchannel-go"
 	"google.golang.org/grpc"
 )
 
@@ -37,8 +36,8 @@ type (
 		GetFrontendGRPCServerOptions() ([]grpc.ServerOption, error)
 		GetInternodeGRPCServerOptions() ([]grpc.ServerOption, error)
 		GetGRPCListener() net.Listener
-		GetRingpopChannel() *tchannel.Channel
-		CreateFrontendGRPCConnection(hostName string) *grpc.ClientConn
-		CreateInternodeGRPCConnection(hostName string) *grpc.ClientConn
+		CreateRemoteFrontendGRPCConnection(rpcAddress string) *grpc.ClientConn
+		CreateLocalFrontendGRPCConnection() *grpc.ClientConn
+		CreateInternodeGRPCConnection(rpcAddress string) *grpc.ClientConn
 	}
 )

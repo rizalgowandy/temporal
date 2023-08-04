@@ -33,8 +33,17 @@ import (
 
 	"go.temporal.io/server/common/persistence/schema"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	postgresqlschema "go.temporal.io/server/schema/postgresql"
+	postgresqlschemaV96 "go.temporal.io/server/schema/postgresql/v96"
 )
+
+// ErrDupEntryCode indicates a duplicate primary key i.e. the row already exists,
+// check http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html
+const ErrDupEntryCode = pq.ErrorCode("23505")
+
+func (pdb *db) IsDupEntryError(err error) bool {
+	sqlErr, ok := err.(*pq.Error)
+	return ok && sqlErr.Code == ErrDupEntryCode
+}
 
 // db represents a logical connection to mysql database
 type db struct {
@@ -49,15 +58,6 @@ type db struct {
 
 var _ sqlplugin.DB = (*db)(nil)
 var _ sqlplugin.Tx = (*db)(nil)
-
-// ErrDupEntry indicates a duplicate primary key i.e. the row already exists,
-// check http://www.postgresql.org/docs/9.3/static/errcodes-appendix.html
-const ErrDupEntry = "23505"
-
-func (pdb *db) IsDupEntryError(err error) bool {
-	sqlErr, ok := err.(*pq.Error)
-	return ok && sqlErr.Code == ErrDupEntry
-}
 
 // newDB returns an instance of DB, which is a logical
 // connection to the underlying postgresql database
@@ -110,13 +110,18 @@ func (pdb *db) PluginName() string {
 	return PluginName
 }
 
+// DbName returns the name of the database
+func (pdb *db) DbName() string {
+	return pdb.dbName
+}
+
 // ExpectedVersion returns expected version.
 func (pdb *db) ExpectedVersion() string {
 	switch pdb.dbKind {
 	case sqlplugin.DbKindMain:
-		return postgresqlschema.Version
+		return postgresqlschemaV96.Version
 	case sqlplugin.DbKindVisibility:
-		return postgresqlschema.VisibilityVersion
+		return postgresqlschemaV96.VisibilityVersion
 	default:
 		panic(fmt.Sprintf("unknown db kind %v", pdb.dbKind))
 	}

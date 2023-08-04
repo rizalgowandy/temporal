@@ -28,18 +28,6 @@ import (
 	"go.temporal.io/server/common/backoff"
 )
 
-// State represents the current state of a task
-type State int
-
-const (
-	// TaskStatePending is the state for a task when it's waiting to be processed or currently being processed
-	TaskStatePending State = iota + 1
-	// TaskStateAcked is the state for a task if it has been successfully completed
-	TaskStateAcked
-	// TaskStateNacked is the state for a task if it can not be processed
-	TaskStateNacked
-)
-
 //go:generate mockgen -copyright_file ../../LICENSE -package $GOPACKAGE -source $GOFILE -destination task_mock.go
 type (
 	// Task is the interface for tasks which should be executed sequentially
@@ -52,22 +40,17 @@ type (
 		IsRetryableError(err error) bool
 		// RetryPolicy returns the retry policy for task processing
 		RetryPolicy() backoff.RetryPolicy
+		// Abort marks the task as aborted, usually means task executor shutdown
+		Abort()
+		// Cancel marks the task as cancelled, usually by the task submitter
+		Cancel()
 		// Ack marks the task as successful completed
 		Ack()
 		// Nack marks the task as unsuccessful completed
-		Nack()
+		Nack(err error)
 		// Reschedule marks the task for retry
 		Reschedule()
 		// State returns the current task state
 		State() State
-	}
-
-	// PriorityTask is the interface for tasks which have and can be assigned a priority
-	PriorityTask interface {
-		Task
-		// GetPriority returns the priority of the task
-		GetPriority() int
-		// SetPriority sets the priority of the task
-		SetPriority(int)
 	}
 )

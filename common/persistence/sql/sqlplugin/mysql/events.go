@@ -42,6 +42,10 @@ const (
 		`WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND ((node_id = ? AND txn_id > ?) OR node_id > ?) AND node_id < ? ` +
 		`ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT ? `
 
+	getHistoryNodesReverseQuery = `SELECT node_id, prev_txn_id, txn_id, data, data_encoding FROM history_node ` +
+		`WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND node_id >= ? AND ((node_id = ? AND txn_id < ?) OR node_id < ?) ` +
+		`ORDER BY shard_id, tree_id, branch_id DESC, node_id DESC, txn_id DESC LIMIT ? `
+
 	getHistoryNodeMetadataQuery = `SELECT node_id, prev_txn_id, txn_id FROM history_node ` +
 		`WHERE shard_id = ? AND tree_id = ? AND branch_id = ? AND ((node_id = ? AND txn_id > ?) OR node_id > ?) AND node_id < ? ` +
 		`ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT ? `
@@ -57,6 +61,14 @@ const (
 		`ON DUPLICATE KEY UPDATE data=VALUES(data), data_encoding=VALUES(data_encoding)`
 
 	getHistoryTreeQuery = `SELECT branch_id, data, data_encoding FROM history_tree WHERE shard_id = ? AND tree_id = ? `
+
+	// conceptually this query is WHERE (shard_id, tree_id, branch_id) > (?, ?, ?)
+	// but mysql doesn't execute it efficiently unless it's spelled out like this
+	paginateBranchesQuery = `SELECT shard_id, tree_id, branch_id, data, data_encoding
+		FROM history_tree
+		WHERE (shard_id = ? AND ((tree_id = ? AND branch_id > ?) OR tree_id > ?)) OR shard_id > ?
+		ORDER BY shard_id, tree_id, branch_id
+		LIMIT ?`
 
 	deleteHistoryTreeQuery = `DELETE FROM history_tree WHERE shard_id = ? AND tree_id = ? AND branch_id = ? `
 )
@@ -101,25 +113,42 @@ func (mdb *db) RangeSelectFromHistoryNode(
 	var query string
 	if filter.MetadataOnly {
 		query = getHistoryNodeMetadataQuery
+	} else if filter.ReverseOrder {
+		query = getHistoryNodesReverseQuery
 	} else {
 		query = getHistoryNodesQuery
 	}
 
+	var args []interface{}
+	if filter.ReverseOrder {
+		args = []interface{}{
+			filter.ShardID,
+			filter.TreeID,
+			filter.BranchID,
+			filter.MinNodeID,
+			filter.MaxTxnID,
+			-filter.MaxTxnID,
+			filter.MaxNodeID,
+			filter.PageSize,
+		}
+	} else {
+		args = []interface{}{
+			filter.ShardID,
+			filter.TreeID,
+			filter.BranchID,
+			filter.MinNodeID,
+			-filter.MinTxnID, // NOTE: transaction ID is *= -1 when stored
+			filter.MinNodeID,
+			filter.MaxNodeID,
+			filter.PageSize,
+		}
+	}
+
 	var rows []sqlplugin.HistoryNodeRow
-	if err := mdb.conn.SelectContext(ctx,
-		&rows,
-		query,
-		filter.ShardID,
-		filter.TreeID,
-		filter.BranchID,
-		filter.MinNodeID,
-		-filter.MinTxnID, // NOTE: transaction ID is *= -1 when stored
-		filter.MinNodeID,
-		filter.MaxNodeID,
-		filter.PageSize,
-	); err != nil {
+	if err := mdb.conn.SelectContext(ctx, &rows, query, args...); err != nil {
 		return nil, err
 	}
+
 	// NOTE: since we let txn_id multiple by -1 when inserting, we have to revert it back here
 	for index := range rows {
 		rows[index].TxnID = -rows[index].TxnID
@@ -165,6 +194,27 @@ func (mdb *db) SelectFromHistoryTree(
 		getHistoryTreeQuery,
 		filter.ShardID,
 		filter.TreeID,
+	)
+	return rows, err
+}
+
+// PaginateBranchesFromHistoryTree reads up to page.Limit rows from the history_tree table sorted by their primary key,
+// while skipping the first page.Offset rows.
+func (mdb *db) PaginateBranchesFromHistoryTree(
+	ctx context.Context,
+	page sqlplugin.HistoryTreeBranchPage,
+) ([]sqlplugin.HistoryTreeRow, error) {
+	var rows []sqlplugin.HistoryTreeRow
+	err := mdb.conn.SelectContext(
+		ctx,
+		&rows,
+		paginateBranchesQuery,
+		page.ShardID,
+		page.TreeID,
+		page.BranchID,
+		page.TreeID,
+		page.ShardID,
+		page.Limit,
 	)
 	return rows, err
 }

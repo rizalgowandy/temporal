@@ -25,15 +25,18 @@
 package worker
 
 import (
+	"context"
 	"sync/atomic"
 
-	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"
+	"go.uber.org/fx"
+
 	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/sdk"
 	workercommon "go.temporal.io/server/service/worker/common"
-	"go.uber.org/fx"
 )
 
 const DefaultWorkerTaskQueue = "default-worker-tq"
@@ -43,7 +46,7 @@ type (
 	workerManager struct {
 		status           int32
 		logger           log.Logger
-		sdkClient        sdkclient.Client
+		sdkClientFactory sdk.ClientFactory
 		workers          []sdkworker.Worker
 		workerComponents []workercommon.WorkerComponent
 	}
@@ -51,7 +54,7 @@ type (
 	initParams struct {
 		fx.In
 		Logger           log.Logger
-		SdkClient        sdkclient.Client
+		SdkClientFactory sdk.ClientFactory
 		WorkerComponents []workercommon.WorkerComponent `group:"workerComponent"`
 	}
 )
@@ -59,7 +62,7 @@ type (
 func NewWorkerManager(params initParams) *workerManager {
 	return &workerManager{
 		logger:           params.Logger,
-		sdkClient:        params.SdkClient,
+		sdkClientFactory: params.SdkClientFactory,
 		workerComponents: params.WorkerComponents,
 	}
 }
@@ -75,8 +78,10 @@ func (wm *workerManager) Start() {
 
 	defaultWorkerOptions := sdkworker.Options{
 		// TODO: add dynamic config for worker options
+		BackgroundActivityContext: headers.SetCallerType(context.Background(), headers.CallerTypeBackground),
 	}
-	defaultWorker := sdkworker.New(wm.sdkClient, DefaultWorkerTaskQueue, defaultWorkerOptions)
+	sdkClient := wm.sdkClientFactory.GetSystemClient()
+	defaultWorker := wm.sdkClientFactory.NewWorker(sdkClient, DefaultWorkerTaskQueue, defaultWorkerOptions)
 	wm.workers = []sdkworker.Worker{defaultWorker}
 
 	for _, wc := range wm.workerComponents {
@@ -86,14 +91,16 @@ func (wm *workerManager) Start() {
 			wc.Register(defaultWorker)
 		} else {
 			// this worker component requires a dedicated worker
-			dedicatedWorker := sdkworker.New(wm.sdkClient, workerOptions.TaskQueue, workerOptions.Options)
+			dedicatedWorker := wm.sdkClientFactory.NewWorker(sdkClient, workerOptions.TaskQueue, workerOptions.Options)
 			wc.Register(dedicatedWorker)
 			wm.workers = append(wm.workers, dedicatedWorker)
 		}
 	}
 
 	for _, w := range wm.workers {
-		w.Start()
+		if err := w.Start(); err != nil {
+			wm.logger.Fatal("Unable to start worker", tag.Error(err))
+		}
 	}
 
 	wm.logger.Info("", tag.ComponentWorkerManager, tag.LifeCycleStarted)

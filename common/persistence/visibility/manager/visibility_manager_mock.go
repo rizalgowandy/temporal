@@ -29,9 +29,11 @@
 package manager
 
 import (
+	context "context"
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	namespace "go.temporal.io/server/common/namespace"
 )
 
 // MockVisibilityManager is a mock of VisibilityManager interface.
@@ -70,221 +72,293 @@ func (mr *MockVisibilityManagerMockRecorder) Close() *gomock.Call {
 }
 
 // CountWorkflowExecutions mocks base method.
-func (m *MockVisibilityManager) CountWorkflowExecutions(request *CountWorkflowExecutionsRequest) (*CountWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) CountWorkflowExecutions(ctx context.Context, request *CountWorkflowExecutionsRequest) (*CountWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "CountWorkflowExecutions", request)
+	ret := m.ctrl.Call(m, "CountWorkflowExecutions", ctx, request)
 	ret0, _ := ret[0].(*CountWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // CountWorkflowExecutions indicates an expected call of CountWorkflowExecutions.
-func (mr *MockVisibilityManagerMockRecorder) CountWorkflowExecutions(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) CountWorkflowExecutions(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).CountWorkflowExecutions), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CountWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).CountWorkflowExecutions), ctx, request)
 }
 
 // DeleteWorkflowExecution mocks base method.
-func (m *MockVisibilityManager) DeleteWorkflowExecution(request *VisibilityDeleteWorkflowExecutionRequest) error {
+func (m *MockVisibilityManager) DeleteWorkflowExecution(ctx context.Context, request *VisibilityDeleteWorkflowExecutionRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "DeleteWorkflowExecution", request)
+	ret := m.ctrl.Call(m, "DeleteWorkflowExecution", ctx, request)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // DeleteWorkflowExecution indicates an expected call of DeleteWorkflowExecution.
-func (mr *MockVisibilityManagerMockRecorder) DeleteWorkflowExecution(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) DeleteWorkflowExecution(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteWorkflowExecution", reflect.TypeOf((*MockVisibilityManager)(nil).DeleteWorkflowExecution), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteWorkflowExecution", reflect.TypeOf((*MockVisibilityManager)(nil).DeleteWorkflowExecution), ctx, request)
 }
 
-// GetName mocks base method.
-func (m *MockVisibilityManager) GetName() string {
+// GetIndexName mocks base method.
+func (m *MockVisibilityManager) GetIndexName() string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "GetName")
+	ret := m.ctrl.Call(m, "GetIndexName")
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
-// GetName indicates an expected call of GetName.
-func (mr *MockVisibilityManagerMockRecorder) GetName() *gomock.Call {
+// GetIndexName indicates an expected call of GetIndexName.
+func (mr *MockVisibilityManagerMockRecorder) GetIndexName() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetName", reflect.TypeOf((*MockVisibilityManager)(nil).GetName))
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetIndexName", reflect.TypeOf((*MockVisibilityManager)(nil).GetIndexName))
+}
+
+// GetReadStoreName mocks base method.
+func (m *MockVisibilityManager) GetReadStoreName(nsName namespace.Name) string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetReadStoreName", nsName)
+	ret0, _ := ret[0].(string)
+	return ret0
+}
+
+// GetReadStoreName indicates an expected call of GetReadStoreName.
+func (mr *MockVisibilityManagerMockRecorder) GetReadStoreName(nsName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReadStoreName", reflect.TypeOf((*MockVisibilityManager)(nil).GetReadStoreName), nsName)
+}
+
+// GetStoreNames mocks base method.
+func (m *MockVisibilityManager) GetStoreNames() []string {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetStoreNames")
+	ret0, _ := ret[0].([]string)
+	return ret0
+}
+
+// GetStoreNames indicates an expected call of GetStoreNames.
+func (mr *MockVisibilityManagerMockRecorder) GetStoreNames() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetStoreNames", reflect.TypeOf((*MockVisibilityManager)(nil).GetStoreNames))
+}
+
+// GetWorkflowExecution mocks base method.
+func (m *MockVisibilityManager) GetWorkflowExecution(ctx context.Context, request *GetWorkflowExecutionRequest) (*GetWorkflowExecutionResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetWorkflowExecution", ctx, request)
+	ret0, _ := ret[0].(*GetWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetWorkflowExecution indicates an expected call of GetWorkflowExecution.
+func (mr *MockVisibilityManagerMockRecorder) GetWorkflowExecution(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetWorkflowExecution", reflect.TypeOf((*MockVisibilityManager)(nil).GetWorkflowExecution), ctx, request)
+}
+
+// HasStoreName mocks base method.
+func (m *MockVisibilityManager) HasStoreName(stName string) bool {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "HasStoreName", stName)
+	ret0, _ := ret[0].(bool)
+	return ret0
+}
+
+// HasStoreName indicates an expected call of HasStoreName.
+func (mr *MockVisibilityManagerMockRecorder) HasStoreName(stName interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "HasStoreName", reflect.TypeOf((*MockVisibilityManager)(nil).HasStoreName), stName)
 }
 
 // ListClosedWorkflowExecutions mocks base method.
-func (m *MockVisibilityManager) ListClosedWorkflowExecutions(request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListClosedWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutions", request)
+	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutions", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListClosedWorkflowExecutions indicates an expected call of ListClosedWorkflowExecutions.
-func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutions(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutions(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutions), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutions), ctx, request)
 }
 
 // ListClosedWorkflowExecutionsByStatus mocks base method.
-func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByStatus(request *ListClosedWorkflowExecutionsByStatusRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByStatus(ctx context.Context, request *ListClosedWorkflowExecutionsByStatusRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByStatus", request)
+	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByStatus", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListClosedWorkflowExecutionsByStatus indicates an expected call of ListClosedWorkflowExecutionsByStatus.
-func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByStatus(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByStatus(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByStatus", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByStatus), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByStatus", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByStatus), ctx, request)
 }
 
 // ListClosedWorkflowExecutionsByType mocks base method.
-func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByType(request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByType(ctx context.Context, request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByType", request)
+	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByType", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListClosedWorkflowExecutionsByType indicates an expected call of ListClosedWorkflowExecutionsByType.
-func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByType(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByType(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByType", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByType), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByType", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByType), ctx, request)
 }
 
 // ListClosedWorkflowExecutionsByWorkflowID mocks base method.
-func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByWorkflowID(request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListClosedWorkflowExecutionsByWorkflowID(ctx context.Context, request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByWorkflowID", request)
+	ret := m.ctrl.Call(m, "ListClosedWorkflowExecutionsByWorkflowID", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListClosedWorkflowExecutionsByWorkflowID indicates an expected call of ListClosedWorkflowExecutionsByWorkflowID.
-func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByWorkflowID(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListClosedWorkflowExecutionsByWorkflowID(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByWorkflowID", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByWorkflowID), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListClosedWorkflowExecutionsByWorkflowID", reflect.TypeOf((*MockVisibilityManager)(nil).ListClosedWorkflowExecutionsByWorkflowID), ctx, request)
 }
 
 // ListOpenWorkflowExecutions mocks base method.
-func (m *MockVisibilityManager) ListOpenWorkflowExecutions(request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListOpenWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutions", request)
+	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutions", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListOpenWorkflowExecutions indicates an expected call of ListOpenWorkflowExecutions.
-func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutions(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutions(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutions), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutions), ctx, request)
 }
 
 // ListOpenWorkflowExecutionsByType mocks base method.
-func (m *MockVisibilityManager) ListOpenWorkflowExecutionsByType(request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListOpenWorkflowExecutionsByType(ctx context.Context, request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutionsByType", request)
+	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutionsByType", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListOpenWorkflowExecutionsByType indicates an expected call of ListOpenWorkflowExecutionsByType.
-func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutionsByType(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutionsByType(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutionsByType", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutionsByType), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutionsByType", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutionsByType), ctx, request)
 }
 
 // ListOpenWorkflowExecutionsByWorkflowID mocks base method.
-func (m *MockVisibilityManager) ListOpenWorkflowExecutionsByWorkflowID(request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListOpenWorkflowExecutionsByWorkflowID(ctx context.Context, request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutionsByWorkflowID", request)
+	ret := m.ctrl.Call(m, "ListOpenWorkflowExecutionsByWorkflowID", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListOpenWorkflowExecutionsByWorkflowID indicates an expected call of ListOpenWorkflowExecutionsByWorkflowID.
-func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutionsByWorkflowID(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListOpenWorkflowExecutionsByWorkflowID(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutionsByWorkflowID", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutionsByWorkflowID), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListOpenWorkflowExecutionsByWorkflowID", reflect.TypeOf((*MockVisibilityManager)(nil).ListOpenWorkflowExecutionsByWorkflowID), ctx, request)
 }
 
 // ListWorkflowExecutions mocks base method.
-func (m *MockVisibilityManager) ListWorkflowExecutions(request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ListWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ListWorkflowExecutions", request)
+	ret := m.ctrl.Call(m, "ListWorkflowExecutions", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ListWorkflowExecutions indicates an expected call of ListWorkflowExecutions.
-func (mr *MockVisibilityManagerMockRecorder) ListWorkflowExecutions(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ListWorkflowExecutions(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListWorkflowExecutions), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ListWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ListWorkflowExecutions), ctx, request)
 }
 
 // RecordWorkflowExecutionClosed mocks base method.
-func (m *MockVisibilityManager) RecordWorkflowExecutionClosed(request *RecordWorkflowExecutionClosedRequest) error {
+func (m *MockVisibilityManager) RecordWorkflowExecutionClosed(ctx context.Context, request *RecordWorkflowExecutionClosedRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RecordWorkflowExecutionClosed", request)
+	ret := m.ctrl.Call(m, "RecordWorkflowExecutionClosed", ctx, request)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RecordWorkflowExecutionClosed indicates an expected call of RecordWorkflowExecutionClosed.
-func (mr *MockVisibilityManagerMockRecorder) RecordWorkflowExecutionClosed(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) RecordWorkflowExecutionClosed(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordWorkflowExecutionClosed", reflect.TypeOf((*MockVisibilityManager)(nil).RecordWorkflowExecutionClosed), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordWorkflowExecutionClosed", reflect.TypeOf((*MockVisibilityManager)(nil).RecordWorkflowExecutionClosed), ctx, request)
 }
 
 // RecordWorkflowExecutionStarted mocks base method.
-func (m *MockVisibilityManager) RecordWorkflowExecutionStarted(request *RecordWorkflowExecutionStartedRequest) error {
+func (m *MockVisibilityManager) RecordWorkflowExecutionStarted(ctx context.Context, request *RecordWorkflowExecutionStartedRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RecordWorkflowExecutionStarted", request)
+	ret := m.ctrl.Call(m, "RecordWorkflowExecutionStarted", ctx, request)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // RecordWorkflowExecutionStarted indicates an expected call of RecordWorkflowExecutionStarted.
-func (mr *MockVisibilityManagerMockRecorder) RecordWorkflowExecutionStarted(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) RecordWorkflowExecutionStarted(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordWorkflowExecutionStarted", reflect.TypeOf((*MockVisibilityManager)(nil).RecordWorkflowExecutionStarted), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RecordWorkflowExecutionStarted", reflect.TypeOf((*MockVisibilityManager)(nil).RecordWorkflowExecutionStarted), ctx, request)
 }
 
 // ScanWorkflowExecutions mocks base method.
-func (m *MockVisibilityManager) ScanWorkflowExecutions(request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error) {
+func (m *MockVisibilityManager) ScanWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error) {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ScanWorkflowExecutions", request)
+	ret := m.ctrl.Call(m, "ScanWorkflowExecutions", ctx, request)
 	ret0, _ := ret[0].(*ListWorkflowExecutionsResponse)
 	ret1, _ := ret[1].(error)
 	return ret0, ret1
 }
 
 // ScanWorkflowExecutions indicates an expected call of ScanWorkflowExecutions.
-func (mr *MockVisibilityManagerMockRecorder) ScanWorkflowExecutions(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) ScanWorkflowExecutions(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ScanWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ScanWorkflowExecutions), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ScanWorkflowExecutions", reflect.TypeOf((*MockVisibilityManager)(nil).ScanWorkflowExecutions), ctx, request)
 }
 
 // UpsertWorkflowExecution mocks base method.
-func (m *MockVisibilityManager) UpsertWorkflowExecution(request *UpsertWorkflowExecutionRequest) error {
+func (m *MockVisibilityManager) UpsertWorkflowExecution(ctx context.Context, request *UpsertWorkflowExecutionRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "UpsertWorkflowExecution", request)
+	ret := m.ctrl.Call(m, "UpsertWorkflowExecution", ctx, request)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
 // UpsertWorkflowExecution indicates an expected call of UpsertWorkflowExecution.
-func (mr *MockVisibilityManagerMockRecorder) UpsertWorkflowExecution(request interface{}) *gomock.Call {
+func (mr *MockVisibilityManagerMockRecorder) UpsertWorkflowExecution(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertWorkflowExecution", reflect.TypeOf((*MockVisibilityManager)(nil).UpsertWorkflowExecution), request)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpsertWorkflowExecution", reflect.TypeOf((*MockVisibilityManager)(nil).UpsertWorkflowExecution), ctx, request)
+}
+
+// ValidateCustomSearchAttributes mocks base method.
+func (m *MockVisibilityManager) ValidateCustomSearchAttributes(searchAttributes map[string]any) (map[string]any, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ValidateCustomSearchAttributes", searchAttributes)
+	ret0, _ := ret[0].(map[string]any)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ValidateCustomSearchAttributes indicates an expected call of ValidateCustomSearchAttributes.
+func (mr *MockVisibilityManagerMockRecorder) ValidateCustomSearchAttributes(searchAttributes interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ValidateCustomSearchAttributes", reflect.TypeOf((*MockVisibilityManager)(nil).ValidateCustomSearchAttributes), searchAttributes)
 }

@@ -44,6 +44,11 @@ const (
 	defaultFirstPhaseMaximumAttempts = 3
 )
 
+var (
+	// DisabledRetryPolicy is a retry policy that never retries
+	DisabledRetryPolicy RetryPolicy = &disabledRetryPolicyImpl{}
+)
+
 type (
 	// RetryPolicy is the API which needs to be implemented by various retry policy implementations
 	RetryPolicy interface {
@@ -62,7 +67,8 @@ type (
 	}
 
 	// ExponentialRetryPolicy provides the implementation for retry policy using a coefficient to compute the next delay.
-	// Formula used to compute the next delay is: initialInterval * math.Pow(backoffCoefficient, currentAttempt)
+	// Formula used to compute the next delay is:
+	// 	min(initialInterval * pow(backoffCoefficient, currentAttempt), maximumInterval)
 	ExponentialRetryPolicy struct {
 		initialInterval    time.Duration
 		backoffCoefficient float64
@@ -78,6 +84,8 @@ type (
 		firstPolicy  RetryPolicy
 		secondPolicy RetryPolicy
 	}
+
+	disabledRetryPolicyImpl struct{}
 
 	systemClock struct{}
 
@@ -115,33 +123,40 @@ func NewRetrier(policy RetryPolicy, clock Clock) Retrier {
 	}
 }
 
-// SetInitialInterval sets the initial interval used by ExponentialRetryPolicy for the very first retry
+// WithInitialInterval sets the initial interval used by ExponentialRetryPolicy for the very first retry
 // All later retries are computed using the following formula:
 // initialInterval * math.Pow(backoffCoefficient, currentAttempt)
-func (p *ExponentialRetryPolicy) SetInitialInterval(initialInterval time.Duration) {
+func (p *ExponentialRetryPolicy) WithInitialInterval(initialInterval time.Duration) *ExponentialRetryPolicy {
 	p.initialInterval = initialInterval
+	return p
 }
 
-// SetBackoffCoefficient sets the coefficient used by ExponentialRetryPolicy to compute next delay for each retry
+// WithBackoffCoefficient sets the coefficient used by ExponentialRetryPolicy to compute next delay for each retry
 // All retries are computed using the following formula:
 // initialInterval * math.Pow(backoffCoefficient, currentAttempt)
-func (p *ExponentialRetryPolicy) SetBackoffCoefficient(backoffCoefficient float64) {
+func (p *ExponentialRetryPolicy) WithBackoffCoefficient(backoffCoefficient float64) *ExponentialRetryPolicy {
 	p.backoffCoefficient = backoffCoefficient
+	return p
 }
 
-// SetMaximumInterval sets the maximum interval for each retry
-func (p *ExponentialRetryPolicy) SetMaximumInterval(maximumInterval time.Duration) {
+// WithMaximumInterval sets the maximum interval for each retry.
+// This does *not* cause the policy to stop retrying when the interval between retries reaches the supplied duration.
+// That is what WithExpirationInterval does. Instead, this prevents the interval from exceeding maximumInterval.
+func (p *ExponentialRetryPolicy) WithMaximumInterval(maximumInterval time.Duration) *ExponentialRetryPolicy {
 	p.maximumInterval = maximumInterval
+	return p
 }
 
-// SetExpirationInterval sets the absolute expiration interval for all retries
-func (p *ExponentialRetryPolicy) SetExpirationInterval(expirationInterval time.Duration) {
+// WithExpirationInterval sets the absolute expiration interval for all retries
+func (p *ExponentialRetryPolicy) WithExpirationInterval(expirationInterval time.Duration) *ExponentialRetryPolicy {
 	p.expirationInterval = expirationInterval
+	return p
 }
 
-// SetMaximumAttempts sets the maximum number of retry attempts
-func (p *ExponentialRetryPolicy) SetMaximumAttempts(maximumAttempts int) {
+// WithMaximumAttempts sets the maximum number of retry attempts
+func (p *ExponentialRetryPolicy) WithMaximumAttempts(maximumAttempts int) *ExponentialRetryPolicy {
 	p.maximumAttempts = maximumAttempts
+	return p
 }
 
 // ComputeNextDelay returns the next delay interval.  This is used by Retrier to delay calling the operation again
@@ -194,6 +209,10 @@ func (tp *TwoPhaseRetryPolicy) ComputeNextDelay(elapsedTime time.Duration, numAt
 		nextInterval = tp.secondPolicy.ComputeNextDelay(elapsedTime, numAttempts-defaultFirstPhaseMaximumAttempts)
 	}
 	return nextInterval
+}
+
+func (r *disabledRetryPolicyImpl) ComputeNextDelay(_ time.Duration, _ int) time.Duration {
+	return done
 }
 
 // Now returns the current time using the system clock

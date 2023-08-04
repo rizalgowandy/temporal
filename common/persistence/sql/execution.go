@@ -42,6 +42,7 @@ import (
 
 type sqlExecutionStore struct {
 	SqlStore
+	p.HistoryBranchUtilImpl
 }
 
 var _ p.ExecutionStore = (*sqlExecutionStore)(nil)
@@ -79,16 +80,15 @@ func (m *sqlExecutionStore) txExecuteShardLocked(
 }
 
 func (m *sqlExecutionStore) CreateWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalCreateWorkflowExecutionRequest,
 ) (response *p.InternalCreateWorkflowExecutionResponse, err error) {
 	for _, req := range request.NewWorkflowNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return nil, err
 		}
 	}
 
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	err = m.txExecuteShardLocked(ctx,
 		"CreateWorkflowExecution",
 		request.ShardID,
@@ -144,7 +144,7 @@ func (m *sqlExecutionStore) createWorkflowExecutionTx(
 			// current run ID is already request ID
 		}
 
-	case p.CreateWorkflowModeWorkflowIDReuse:
+	case p.CreateWorkflowModeUpdateCurrent:
 		if currentRow == nil {
 			return nil, extractCurrentWorkflowConflictError(currentRow, "")
 		}
@@ -185,7 +185,7 @@ func (m *sqlExecutionStore) createWorkflowExecutionTx(
 			)
 		}
 
-	case p.CreateWorkflowModeZombie:
+	case p.CreateWorkflowModeBypassCurrent:
 		if err := assertRunIDMismatch(
 			primitives.MustParseUUID(newWorkflow.ExecutionState.RunId),
 			currentRow,
@@ -224,24 +224,23 @@ func (m *sqlExecutionStore) createWorkflowExecutionTx(
 }
 
 func (m *sqlExecutionStore) GetWorkflowExecution(
+	ctx context.Context,
 	request *p.GetWorkflowExecutionRequest,
 ) (*p.InternalGetWorkflowExecutionResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	namespaceID := primitives.MustParseUUID(request.NamespaceID)
-	runID := primitives.MustParseUUID(request.Execution.RunId)
-	wfID := request.Execution.WorkflowId
+	workflowID := request.WorkflowID
+	runID := primitives.MustParseUUID(request.RunID)
 	executionsRow, err := m.Db.SelectFromExecutions(ctx, sqlplugin.ExecutionsFilter{
 		ShardID:     request.ShardID,
 		NamespaceID: namespaceID,
-		WorkflowID:  wfID,
+		WorkflowID:  workflowID,
 		RunID:       runID,
 	})
 	switch err {
 	case nil:
 		// noop
 	case sql.ErrNoRows:
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("Workflow executionsRow not found.  WorkflowId: %v, RunId: %v", request.Execution.GetWorkflowId(), request.Execution.GetRunId()))
+		return nil, serviceerror.NewNotFound(fmt.Sprintf("Workflow executionsRow not found.  WorkflowId: %v, RunId: %v", workflowID, runID))
 	default:
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetWorkflowExecution: failed. Error: %v", err))
 	}
@@ -258,7 +257,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -269,7 +268,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -280,7 +279,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -291,7 +290,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -302,7 +301,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -313,7 +312,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -324,7 +323,7 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 		m.Db,
 		request.ShardID,
 		namespaceID,
-		wfID,
+		workflowID,
 		runID,
 	)
 	if err != nil {
@@ -338,23 +337,22 @@ func (m *sqlExecutionStore) GetWorkflowExecution(
 }
 
 func (m *sqlExecutionStore) UpdateWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalUpdateWorkflowExecutionRequest,
 ) error {
 	// first append history
 	for _, req := range request.UpdateWorkflowNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.NewWorkflowNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 
 	// then update mutable state
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	return m.txExecuteShardLocked(ctx,
 		"UpdateWorkflowExecution",
 		request.ShardID,
@@ -397,7 +395,7 @@ func (m *sqlExecutionStore) updateWorkflowExecutionTx(
 			newRunID := primitives.MustParseUUID(newWorkflow.ExecutionState.RunId)
 
 			if !bytes.Equal(namespaceID, newNamespaceID) {
-				return serviceerror.NewUnavailable(fmt.Sprintf("UpdateWorkflowExecution: cannot continue as new to another namespace"))
+				return serviceerror.NewUnavailable("UpdateWorkflowExecution: cannot continue as new to another namespace")
 			}
 
 			if err := assertRunIDAndUpdateCurrentExecution(ctx,
@@ -412,7 +410,7 @@ func (m *sqlExecutionStore) updateWorkflowExecutionTx(
 				newWorkflow.ExecutionState.Status,
 				lastWriteVersion,
 			); err != nil {
-				return serviceerror.NewUnavailable(fmt.Sprintf("UpdateWorkflowExecution: failed to continue as new current execution. Error: %v", err))
+				return err
 			}
 		} else {
 			lastWriteVersion := updateWorkflow.LastWriteVersion
@@ -429,7 +427,7 @@ func (m *sqlExecutionStore) updateWorkflowExecutionTx(
 				updateWorkflow.ExecutionState.Status,
 				lastWriteVersion,
 			); err != nil {
-				return serviceerror.NewUnavailable(fmt.Sprintf("UpdateWorkflowExecution: failed to update current execution. Error: %v", err))
+				return err
 			}
 		}
 
@@ -458,27 +456,26 @@ func (m *sqlExecutionStore) updateWorkflowExecutionTx(
 }
 
 func (m *sqlExecutionStore) ConflictResolveWorkflowExecution(
+	ctx context.Context,
 	request *p.InternalConflictResolveWorkflowExecutionRequest,
 ) error {
 	// first append history
 	for _, req := range request.CurrentWorkflowEventsNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.ResetWorkflowEventsNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 	for _, req := range request.NewWorkflowEventsNewEvents {
-		if err := m.AppendHistoryNodes(req); err != nil {
+		if err := m.AppendHistoryNodes(ctx, req); err != nil {
 			return err
 		}
 	}
 
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	return m.txExecuteShardLocked(ctx,
 		"ConflictResolveWorkflowExecution",
 		request.ShardID,
@@ -542,7 +539,7 @@ func (m *sqlExecutionStore) conflictResolveWorkflowExecutionTx(
 				status,
 				lastWriteVersion,
 			); err != nil {
-				return serviceerror.NewUnavailable(fmt.Sprintf("ConflictResolveWorkflowExecution. Failed to comare and swap the current record. Error: %v", err))
+				return err
 			}
 		} else {
 			// reset workflow is current
@@ -560,7 +557,7 @@ func (m *sqlExecutionStore) conflictResolveWorkflowExecutionTx(
 				status,
 				lastWriteVersion,
 			); err != nil {
-				return serviceerror.NewUnavailable(fmt.Sprintf("ConflictResolveWorkflowExecution. Failed to comare and swap the current record. Error: %v", err))
+				return err
 			}
 		}
 
@@ -599,10 +596,9 @@ func (m *sqlExecutionStore) conflictResolveWorkflowExecutionTx(
 }
 
 func (m *sqlExecutionStore) DeleteWorkflowExecution(
+	ctx context.Context,
 	request *p.DeleteWorkflowExecutionRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	namespaceID := primitives.MustParseUUID(request.NamespaceID)
 	runID := primitives.MustParseUUID(request.RunID)
 	_, err := m.Db.DeleteFromExecutions(ctx, sqlplugin.ExecutionsFilter{
@@ -619,10 +615,9 @@ func (m *sqlExecutionStore) DeleteWorkflowExecution(
 // runID. The following code will delete the row from current_executions if and only if the runID is
 // same as the one we are trying to delete here
 func (m *sqlExecutionStore) DeleteCurrentWorkflowExecution(
+	ctx context.Context,
 	request *p.DeleteCurrentWorkflowExecutionRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	namespaceID := primitives.MustParseUUID(request.NamespaceID)
 	runID := primitives.MustParseUUID(request.RunID)
 	_, err := m.Db.DeleteFromCurrentExecutions(ctx, sqlplugin.CurrentExecutionsFilter{
@@ -635,10 +630,9 @@ func (m *sqlExecutionStore) DeleteCurrentWorkflowExecution(
 }
 
 func (m *sqlExecutionStore) GetCurrentExecution(
+	ctx context.Context,
 	request *p.GetCurrentExecutionRequest,
 ) (*p.InternalGetCurrentExecutionResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	row, err := m.Db.SelectFromCurrentExecutions(ctx, sqlplugin.CurrentExecutionsFilter{
 		ShardID:     request.ShardID,
 		NamespaceID: primitives.MustParseUUID(request.NamespaceID),
@@ -661,7 +655,36 @@ func (m *sqlExecutionStore) GetCurrentExecution(
 	}, nil
 }
 
+func (m *sqlExecutionStore) SetWorkflowExecution(
+	ctx context.Context,
+	request *p.InternalSetWorkflowExecutionRequest,
+) error {
+	return m.txExecuteShardLocked(ctx,
+		"SetWorkflowExecution",
+		request.ShardID,
+		request.RangeID,
+		func(tx sqlplugin.Tx) error {
+			return m.setWorkflowExecutionTx(ctx, tx, request)
+		})
+}
+
+func (m *sqlExecutionStore) setWorkflowExecutionTx(
+	ctx context.Context,
+	tx sqlplugin.Tx,
+	request *p.InternalSetWorkflowExecutionRequest,
+) error {
+	shardID := request.ShardID
+	setSnapshot := request.SetWorkflowSnapshot
+
+	return applyWorkflowSnapshotTxAsReset(ctx,
+		tx,
+		shardID,
+		&setSnapshot,
+	)
+}
+
 func (m *sqlExecutionStore) ListConcreteExecutions(
+	_ context.Context,
 	_ *p.ListConcreteExecutionsRequest,
 ) (*p.InternalListConcreteExecutionsResponse, error) {
 	return nil, serviceerror.NewUnimplemented("ListConcreteExecutions is not implemented")

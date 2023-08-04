@@ -27,8 +27,11 @@ package tasks
 import (
 	"time"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/definition"
 )
+
+var _ Task = (*CloseExecutionTask)(nil)
 
 type (
 	CloseExecutionTask struct {
@@ -36,14 +39,16 @@ type (
 		VisibilityTimestamp time.Time
 		TaskID              int64
 		Version             int64
+		DeleteAfterClose    bool
+		// CanSkipVisibilityArchival means the archival of visibility records will be handled by the archival queue, so
+		// we can skip archiving visibility records here while processing this task on the transfer queue.
+		CanSkipVisibilityArchival bool
+		DeleteProcessStage        DeleteWorkflowExecutionStage
 	}
 )
 
 func (a *CloseExecutionTask) GetKey() Key {
-	return Key{
-		FireTime: time.Unix(0, 0),
-		TaskID:   a.TaskID,
-	}
+	return NewImmediateKey(a.TaskID)
 }
 
 func (a *CloseExecutionTask) GetVersion() int64 {
@@ -68,4 +73,12 @@ func (a *CloseExecutionTask) GetVisibilityTime() time.Time {
 
 func (a *CloseExecutionTask) SetVisibilityTime(timestamp time.Time) {
 	a.VisibilityTimestamp = timestamp
+}
+
+func (a *CloseExecutionTask) GetCategory() Category {
+	return CategoryTransfer
+}
+
+func (a *CloseExecutionTask) GetType() enumsspb.TaskType {
+	return enumsspb.TASK_TYPE_TRANSFER_CLOSE_EXECUTION
 }

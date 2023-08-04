@@ -25,24 +25,39 @@
 package authorization
 
 var readOnlyNamespaceAPI = map[string]struct{}{
-	"DescribeNamespace":              {},
-	"GetWorkflowExecutionHistory":    {},
-	"ListOpenWorkflowExecutions":     {},
-	"ListClosedWorkflowExecutions":   {},
-	"ListWorkflowExecutions":         {},
-	"ListArchivedWorkflowExecutions": {},
-	"ScanWorkflowExecutions":         {},
-	"CountWorkflowExecutions":        {},
-	"QueryWorkflow":                  {},
-	"DescribeWorkflowExecution":      {},
-	"DescribeTaskQueue":              {},
-	"ListTaskQueuePartitions":        {},
+	"DescribeNamespace":                  {},
+	"GetWorkflowExecutionHistory":        {},
+	"GetWorkflowExecutionHistoryReverse": {},
+	"ListOpenWorkflowExecutions":         {},
+	"ListClosedWorkflowExecutions":       {},
+	"ListWorkflowExecutions":             {},
+	"ListArchivedWorkflowExecutions":     {},
+	"ScanWorkflowExecutions":             {},
+	"CountWorkflowExecutions":            {},
+	"QueryWorkflow":                      {},
+	"DescribeWorkflowExecution":          {},
+	"DescribeTaskQueue":                  {},
+	"ListTaskQueuePartitions":            {},
+	"DescribeSchedule":                   {},
+	"ListSchedules":                      {},
+	"ListScheduleMatchingTimes":          {},
+	"DescribeBatchOperation":             {},
+	"ListBatchOperations":                {},
+	"GetWorkerBuildIdCompatibility":      {},
+	"GetWorkerTaskReachability":          {},
 }
 
 var readOnlyGlobalAPI = map[string]struct{}{
 	"ListNamespaces":      {},
 	"GetSearchAttributes": {},
 	"GetClusterInfo":      {},
+	"GetSystemInfo":       {},
+}
+
+// note that these use the fully-qualified name
+var healthCheckAPI = map[string]struct{}{
+	"/grpc.health.v1.Health/Check":                                   {},
+	"/temporal.api.workflowservice.v1.WorkflowService/GetSystemInfo": {},
 }
 
 func IsReadOnlyNamespaceAPI(api string) bool {
@@ -52,5 +67,10 @@ func IsReadOnlyNamespaceAPI(api string) bool {
 
 func IsReadOnlyGlobalAPI(api string) bool {
 	_, found := readOnlyGlobalAPI[api]
+	return found
+}
+
+func IsHealthCheckAPI(fullApi string) bool {
+	_, found := healthCheckAPI[fullApi]
 	return found
 }

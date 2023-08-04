@@ -30,16 +30,22 @@ import (
 	"os"
 	"path"
 	"strings"
+	_ "time/tzdata" // embed tzdata as a fallback
 
 	"github.com/urfave/cli/v2"
+	"go.uber.org/automaxprocs/maxprocs"
+
 	"go.temporal.io/server/common/authorization"
+	"go.temporal.io/server/common/build"
 	"go.temporal.io/server/common/config"
+	"go.temporal.io/server/common/debug"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/mysql"      // needed to load mysql plugin
 	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/postgresql" // needed to load postgresql plugin
+	_ "go.temporal.io/server/common/persistence/sql/sqlplugin/sqlite"     // needed to load sqlite plugin
 	"go.temporal.io/server/temporal"
 )
 
@@ -84,6 +90,11 @@ func buildCLI() *cli.App {
 			Usage:   "availability zone",
 			EnvVars: []string{config.EnvKeyAvailabilityZone, config.EnvKeyAvailabilityZoneTypo},
 		},
+		&cli.BoolFlag{
+			Name:    "allow-no-auth",
+			Usage:   "allow no authorizer",
+			EnvVars: []string{config.EnvKeyAllowNoAuth},
+		},
 	}
 
 	app.Commands = []*cli.Command{
@@ -101,13 +112,17 @@ func buildCLI() *cli.App {
 				&cli.StringSliceFlag{
 					Name:    "service",
 					Aliases: []string{"svc"},
-					Value:   cli.NewStringSlice(temporal.Services...),
+					Value:   cli.NewStringSlice(temporal.DefaultServices...),
 					Usage:   "service(s) to start",
 				},
 			},
 			Before: func(c *cli.Context) error {
 				if c.Args().Len() > 0 {
 					return cli.Exit("ERROR: start command doesn't support arguments. Use --service flag instead.", 1)
+				}
+
+				if _, err := maxprocs.Set(); err != nil {
+					stdlog.Println(fmt.Sprintf("WARNING: failed to set GOMAXPROCS: %v.", err))
 				}
 				return nil
 			},
@@ -116,6 +131,7 @@ func buildCLI() *cli.App {
 				zone := c.String("zone")
 				configDir := path.Join(c.String("root"), c.String("config"))
 				services := c.StringSlice("service")
+				allowNoAuth := c.Bool("allow-no-auth")
 
 				// For backward compatibility to support old flag format (i.e. `--services=frontend,history,matching`).
 				if c.IsSet("services") {
@@ -129,15 +145,23 @@ func buildCLI() *cli.App {
 				}
 
 				logger := log.NewZapLogger(log.BuildZapLogger(cfg.Log))
+				logger.Info("Build info.",
+					tag.NewTimeTag("git-time", build.InfoData.GitTime),
+					tag.NewStringTag("git-revision", build.InfoData.GitRevision),
+					tag.NewBoolTag("git-modified", build.InfoData.GitModified),
+					tag.NewStringTag("go-arch", build.InfoData.GoArch),
+					tag.NewStringTag("go-os", build.InfoData.GoOs),
+					tag.NewStringTag("go-version", build.InfoData.GoVersion),
+					tag.NewBoolTag("cgo-enabled", build.InfoData.CgoEnabled),
+					tag.NewStringTag("server-version", headers.ServerVersion),
+					tag.NewBoolTag("debug-mode", debug.Enabled),
+				)
 
 				var dynamicConfigClient dynamicconfig.Client
 				if cfg.DynamicConfigClient != nil {
 					dynamicConfigClient, err = dynamicconfig.NewFileBasedClient(cfg.DynamicConfigClient, logger, temporal.InterruptCh())
 					if err != nil {
-						// TODO: uncomment the next line and remove next 3 lines in 1.14.
-						// return cli.Exit(fmt.Sprintf("Unable to create dynamic config client. Error: %v", err), 1)
-						logger.Error("Unable to read dynamic config file. Continue with default settings but the ERROR MUST BE FIXED before the next upgrade", tag.Error(err))
-						dynamicConfigClient = dynamicconfig.NewNoopClient()
+						return cli.Exit(fmt.Sprintf("Unable to create dynamic config client. Error: %v", err), 1)
 					}
 				} else {
 					dynamicConfigClient = dynamicconfig.NewNoopClient()
@@ -147,12 +171,22 @@ func buildCLI() *cli.App {
 				authorizer, err := authorization.GetAuthorizerFromConfig(
 					&cfg.Global.Authorization,
 				)
+				if err != nil {
+					return cli.Exit(fmt.Sprintf("Unable to instantiate authorizer. Error: %v", err), 1)
+				}
+				if authorization.IsNoopAuthorizer(authorizer) && !allowNoAuth {
+					logger.Warn(
+						"Not using any authorizer and flag `--allow-no-auth` not detected. " +
+							"Future versions will require using the flag `--allow-no-auth` " +
+							"if you do not want to set an authorizer.",
+					)
+				}
 
 				claimMapper, err := authorization.GetClaimMapperFromConfig(&cfg.Global.Authorization, logger)
 				if err != nil {
 					return cli.Exit(fmt.Sprintf("Unable to instantiate claim mapper: %v.", err), 1)
 				}
-				s := temporal.NewServer(
+				s, err := temporal.NewServer(
 					temporal.ForServices(services),
 					temporal.WithConfig(cfg),
 					temporal.WithDynamicConfigClient(dynamicConfigClient),
@@ -163,6 +197,9 @@ func buildCLI() *cli.App {
 						return claimMapper
 					}),
 				)
+				if err != nil {
+					return cli.Exit(fmt.Sprintf("Unable to create server. Error: %v.", err), 1)
+				}
 
 				err = s.Start()
 				if err != nil {

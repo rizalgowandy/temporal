@@ -32,24 +32,19 @@ import (
 	"errors"
 	"io"
 	"os"
-	"regexp"
 
 	"cloud.google.com/go/storage"
+	"go.uber.org/multierr"
 	"google.golang.org/api/iterator"
 
 	"go.temporal.io/server/common/archiver"
 	"go.temporal.io/server/common/config"
 )
 
-const (
-	bucketNameRegExpRaw = "^gs:\\/\\/[^:\\/\n?]+"
-)
-
 var (
 	// ErrBucketNotFound is non retryable error that is thrown when the bucket doesn't exist
 	ErrBucketNotFound = errors.New("bucket not found")
 	errObjectNotFound = errors.New("object not found")
-	bucketNameRegExp  = regexp.MustCompile(bucketNameRegExpRaw)
 )
 
 type (
@@ -114,7 +109,6 @@ func (s *storageWrapper) Upload(ctx context.Context, URI archiver.URI, fileName 
 // Exist check if a bucket or an object exist
 // If fileName is empty, then 'Exist' function will only check if the given bucket exist.
 func (s *storageWrapper) Exist(ctx context.Context, URI archiver.URI, fileName string) (exists bool, err error) {
-	err = ErrBucketNotFound
 	bucket := s.client.Bucket(URI.Hostname())
 	if _, err := bucket.Attrs(ctx); err != nil {
 		return false, err
@@ -132,15 +126,16 @@ func (s *storageWrapper) Exist(ctx context.Context, URI archiver.URI, fileName s
 }
 
 // Get retrieve a file
-func (s *storageWrapper) Get(ctx context.Context, URI archiver.URI, fileName string) ([]byte, error) {
+func (s *storageWrapper) Get(ctx context.Context, URI archiver.URI, fileName string) (fileContent []byte, err error) {
 	bucket := s.client.Bucket(URI.Hostname())
 	reader, err := bucket.Object(formatSinkPath(URI.Path()) + "/" + fileName).NewReader(ctx)
-	if err == nil {
-		defer reader.Close()
-		return io.ReadAll(reader)
+	if err != nil {
+		return nil, err
 	}
-
-	return nil, err
+	defer func() {
+		err = multierr.Combine(err, reader.Close())
+	}()
+	return io.ReadAll(reader)
 }
 
 // Query, retieves file names by provided storage query

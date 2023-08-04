@@ -24,11 +24,18 @@ package temporal.server.api.history.v1;
 
 option go_package = "go.temporal.io/server/api/history/v1;history";
 
+import "google/protobuf/timestamp.proto";
+
+import "dependencies/gogoproto/gogo.proto";
+
 import "temporal/api/history/v1/message.proto";
 
 message TransientWorkflowTaskInfo {
-    temporal.api.history.v1.HistoryEvent scheduled_event = 1;
-    temporal.api.history.v1.HistoryEvent started_event = 2;
+    reserved 1;
+    reserved 2;
+
+    // A list of history events that are to be appended to the "real" workflow history.
+    repeated temporal.api.history.v1.HistoryEvent history_suffix = 3;
 }
 
 // VersionHistoryItem contains signal eventId and the corresponding version.
@@ -47,4 +54,14 @@ message VersionHistory {
 message VersionHistories {
     int32 current_version_history_index = 1;
     repeated VersionHistory histories = 2;
+}
+
+message TaskKey {
+    int64 task_id = 1;
+    google.protobuf.Timestamp fire_time = 2 [(gogoproto.stdtime) = true];
+}
+
+message TaskRange {
+    TaskKey inclusive_min_task_key = 1;
+    TaskKey exclusive_max_task_key = 2;
 }

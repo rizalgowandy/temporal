@@ -27,8 +27,11 @@ package tasks
 import (
 	"time"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/definition"
 )
+
+var _ Task = (*StartChildExecutionTask)(nil)
 
 type (
 	StartChildExecutionTask struct {
@@ -37,16 +40,13 @@ type (
 		TaskID              int64
 		TargetNamespaceID   string
 		TargetWorkflowID    string
-		InitiatedID         int64
+		InitiatedEventID    int64
 		Version             int64
 	}
 )
 
 func (u *StartChildExecutionTask) GetKey() Key {
-	return Key{
-		FireTime: time.Unix(0, 0),
-		TaskID:   u.TaskID,
-	}
+	return NewImmediateKey(u.TaskID)
 }
 
 func (u *StartChildExecutionTask) GetVersion() int64 {
@@ -71,4 +71,12 @@ func (u *StartChildExecutionTask) GetVisibilityTime() time.Time {
 
 func (u *StartChildExecutionTask) SetVisibilityTime(timestamp time.Time) {
 	u.VisibilityTimestamp = timestamp
+}
+
+func (u *StartChildExecutionTask) GetCategory() Category {
+	return CategoryTransfer
+}
+
+func (u *StartChildExecutionTask) GetType() enumsspb.TaskType {
+	return enumsspb.TASK_TYPE_TRANSFER_START_CHILD_EXECUTION
 }

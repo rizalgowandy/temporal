@@ -31,20 +31,21 @@ import (
 	"fmt"
 
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	"go.temporal.io/server/common/persistence/visibility/store"
 )
 
 const (
 	templateCreateWorkflowExecutionStarted = `INSERT INTO executions_visibility (` +
-		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding) ` +
-		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding, task_queue) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 		`ON DUPLICATE KEY UPDATE ` +
 		`run_id=VALUES(run_id)`
 
 	templateCreateWorkflowExecutionClosed = `INSERT INTO executions_visibility (` +
-		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, close_time, status, history_length, memo, encoding) ` +
-		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
+		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, close_time, status, history_length, memo, encoding, task_queue) ` +
+		`VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ` +
 		`ON DUPLICATE KEY UPDATE workflow_id = VALUES(workflow_id), start_time = VALUES(start_time), execution_time = VALUES(execution_time), workflow_type_name = VALUES(workflow_type_name), ` +
-		`close_time = VALUES(close_time), status = VALUES(status), history_length = VALUES(history_length), memo = VALUES(memo), encoding = VALUES(encoding)`
+		`close_time = VALUES(close_time), status = VALUES(status), history_length = VALUES(history_length), memo = VALUES(memo), encoding = VALUES(encoding), task_queue = VALUES(task_queue)`
 
 	// RunID condition is needed for correct pagination
 	templateConditions = ` AND namespace_id = ?
@@ -61,7 +62,7 @@ const (
 	ORDER BY close_time DESC, run_id
 	LIMIT ?`
 
-	templateOpenFieldNames = `workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding`
+	templateOpenFieldNames = `workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding, task_queue`
 	templateOpenSelect     = `SELECT ` + templateOpenFieldNames + ` FROM executions_visibility WHERE status = 1 `
 
 	templateClosedSelect = `SELECT ` + templateOpenFieldNames + `, close_time, history_length
@@ -81,10 +82,26 @@ const (
 
 	templateGetClosedWorkflowExecutionsByStatus = templateClosedSelect + `AND status = ?` + templateConditionsClosedWorkflows
 
-	templateGetClosedWorkflowExecution = `SELECT workflow_id, run_id, start_time, execution_time, memo, encoding, close_time, workflow_type_name, status, history_length 
+	templateGetClosedWorkflowExecution = `SELECT workflow_id, run_id, start_time, execution_time, memo, encoding, close_time, workflow_type_name, status, history_length, task_queue 
 		 FROM executions_visibility
 		 WHERE namespace_id = ? AND status != 1
 		 AND run_id = ?`
+
+	templateGetWorkflowExecution = `
+		SELECT
+			workflow_id,
+			run_id,
+			start_time,
+			execution_time,
+			memo,
+			encoding,
+			close_time,
+			workflow_type_name,
+			status,
+			history_length,
+			task_queue 
+		FROM executions_visibility
+		WHERE namespace_id = ? AND run_id = ?`
 
 	templateDeleteWorkflowExecution = "DELETE FROM executions_visibility WHERE namespace_id = ? AND run_id = ?"
 )
@@ -110,6 +127,7 @@ func (mdb *db) InsertIntoVisibility(
 		row.Status,
 		row.Memo,
 		row.Encoding,
+		row.TaskQueue,
 	)
 }
 
@@ -136,6 +154,7 @@ func (mdb *db) ReplaceIntoVisibility(
 			*row.HistoryLength,
 			row.Memo,
 			row.Encoding,
+			row.TaskQueue,
 		)
 	default:
 		return nil, errCloseParams
@@ -255,12 +274,49 @@ func (mdb *db) SelectFromVisibility(
 		return nil, err
 	}
 	for i := range rows {
-		rows[i].StartTime = mdb.converter.FromMySQLDateTime(rows[i].StartTime)
-		rows[i].ExecutionTime = mdb.converter.FromMySQLDateTime(rows[i].ExecutionTime)
-		if rows[i].CloseTime != nil {
-			closeTime := mdb.converter.FromMySQLDateTime(*rows[i].CloseTime)
-			rows[i].CloseTime = &closeTime
-		}
+		mdb.processRowFromDB(&rows[i])
 	}
 	return rows, nil
+}
+
+// GetFromVisibility reads one row from visibility table
+func (mdb *db) GetFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilityGetFilter,
+) (*sqlplugin.VisibilityRow, error) {
+	var row sqlplugin.VisibilityRow
+	err := mdb.conn.GetContext(ctx,
+		&row,
+		templateGetWorkflowExecution,
+		filter.NamespaceID,
+		filter.RunID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	mdb.processRowFromDB(&row)
+	return &row, nil
+}
+
+func (mdb *db) CountFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilitySelectFilter,
+) (int64, error) {
+	return 0, store.OperationNotSupportedErr
+}
+
+func (mdb *db) CountGroupByFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilitySelectFilter,
+) ([]sqlplugin.VisibilityCountRow, error) {
+	return nil, store.OperationNotSupportedErr
+}
+
+func (mdb *db) processRowFromDB(row *sqlplugin.VisibilityRow) {
+	row.StartTime = mdb.converter.FromMySQLDateTime(row.StartTime)
+	row.ExecutionTime = mdb.converter.FromMySQLDateTime(row.ExecutionTime)
+	if row.CloseTime != nil {
+		closeTime := mdb.converter.FromMySQLDateTime(*row.CloseTime)
+		row.CloseTime = &closeTime
+	}
 }

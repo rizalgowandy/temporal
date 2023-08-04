@@ -27,6 +27,7 @@
 package searchattribute
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -45,7 +46,7 @@ type (
 
 	Manager interface {
 		Provider
-		SaveSearchAttributes(indexName string, newCustomSearchAttributes map[string]enumspb.IndexedValueType) error
+		SaveSearchAttributes(ctx context.Context, indexName string, newCustomSearchAttributes map[string]enumspb.IndexedValueType) error
 	}
 )
 
@@ -80,4 +81,15 @@ func setMetadataType(p *commonpb.Payload, t enumspb.IndexedValueType) {
 		panic(fmt.Sprintf("unknown index value type %v", t))
 	}
 	p.Metadata[MetadataType] = []byte(tString)
+}
+
+// This may mutate saPtr and *saPtr
+func AddSearchAttribute(saPtr **commonpb.SearchAttributes, key string, value *commonpb.Payload) {
+	if *saPtr == nil {
+		*saPtr = &commonpb.SearchAttributes{}
+	}
+	if (*saPtr).IndexedFields == nil {
+		(*saPtr).IndexedFields = make(map[string]*commonpb.Payload)
+	}
+	(*saPtr).IndexedFields[key] = value
 }

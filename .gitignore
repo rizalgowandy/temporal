@@ -2,6 +2,7 @@
 
 .idea/
 .vscode/settings.json
+.vscode
 *.code-workspace
 .DS_Store
 .coverage
@@ -18,14 +19,16 @@
 # Executables produced by temporal repo
 /temporal-*
 /tctl*
+/tdbg
 
 # Buf proto image
 /proto/image.bin
 
 # Goreleaser
 /dist
-/bin
 
-# Fossa
-.fossa.yml
+# direnv
+.envrc
 
+# Git SPR: https://github.com/ejoffe/spr
+.spr.yml

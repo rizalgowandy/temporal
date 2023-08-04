@@ -34,10 +34,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dgrijalva/jwt-go/v4"
+	"github.com/golang-jwt/jwt/v4"
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.temporal.io/server/common/primitives"
 
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
@@ -65,7 +66,7 @@ const (
 )
 
 var (
-	permissionsAdmin              = []string{"system:admin", "default:read"}
+	permissionsAdmin              = []string{primitives.SystemLocalNamespace + ":admin", "default:read"}
 	permissionsReaderWriterWorker = []string{"default:read", "default:write", "default:worker"}
 )
 
@@ -161,6 +162,27 @@ func (s *defaultClaimMapperSuite) testTokenWithAdminPermissions(alg keyAlgorithm
 	s.Equal(1, len(claims.Namespaces))
 	defaultRole := claims.Namespaces[defaultNamespace]
 	s.Equal(RoleReader, defaultRole)
+}
+
+func (s *defaultClaimMapperSuite) TestNamespacePermissionCaseSensitive() {
+	tokenString, err := s.tokenGenerator.generateToken(RSA,
+		testSubject, []string{"Temporal-system:admin", "Foo:read"}, errorTestOptionNoError)
+	s.NoError(err)
+	authInfo := &AuthInfo{
+		AddBearer(tokenString),
+		nil,
+		nil,
+		"",
+		"",
+	}
+	claims, err := s.claimMapper.GetClaims(authInfo)
+	s.NoError(err)
+	s.Equal(testSubject, claims.Subject)
+	s.Equal(RoleUndefined, claims.System) // no system role
+	s.Equal(2, len(claims.Namespaces))
+	// claims contain namespace role for 'Foo', not for 'foo'.
+	s.Equal(RoleReader, claims.Namespaces["Foo"])
+	s.Equal(RoleAdmin, claims.Namespaces["Temporal-system"])
 }
 
 func (s *defaultClaimMapperSuite) TestTokenWithReaderWriterWorkerPermissionsRSA() {
@@ -270,6 +292,8 @@ type (
 	}
 )
 
+var _ TokenKeyProvider = (*tokenGenerator)(nil)
+
 func newTokenGenerator() *tokenGenerator {
 
 	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -292,11 +316,11 @@ func newTokenGenerator() *tokenGenerator {
 type (
 	CustomClaims struct {
 		Permissions []string `json:"permissions"`
-		jwt.StandardClaims
+		jwt.RegisteredClaims
 	}
 )
 
-func (CustomClaims) Valid(*jwt.ValidationHelper) error {
+func (CustomClaims) Valid() error {
 	return nil
 }
 
@@ -304,15 +328,11 @@ func (tg *tokenGenerator) generateRSAToken(subject string, permissions []string,
 	return tg.generateToken(RSA, subject, permissions, options)
 }
 
-func (tg *tokenGenerator) generateECDSAToken(subject string, permissions []string, options errorTestOptions) (string, error) {
-	return tg.generateToken(ECDSA, subject, permissions, options)
-}
-
 func (tg *tokenGenerator) generateToken(alg keyAlgorithm, subject string, permissions []string, options errorTestOptions) (string, error) {
 	claims := CustomClaims{
 		permissions,
-		jwt.StandardClaims{
-			ExpiresAt: jwt.At(time.Now().Add(time.Hour)),
+		jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 			Issuer:    "test",
 			Audience:  []string{"test-audience"},
 		},
@@ -355,6 +375,9 @@ func (tg *tokenGenerator) HmacKey(alg string, kid string) ([]byte, error) {
 }
 func (tg *tokenGenerator) RsaKey(alg string, kid string) (*rsa.PublicKey, error) {
 	return tg.rsaPublicKey, nil
+}
+func (tg *tokenGenerator) SupportedMethods() []string {
+	return []string{jwt.SigningMethodRS256.Name, jwt.SigningMethodES256.Name}
 }
 func (tg *tokenGenerator) Close() {
 }

@@ -25,49 +25,56 @@
 package tasks
 
 import (
+	"math/rand"
 	"sync"
 	"testing"
 
-	"github.com/uber-go/tally/v4"
-
 	"go.temporal.io/server/common/backoff"
+	"go.temporal.io/server/common/clock"
+	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/quotas"
 )
 
 type (
-	noopProcessor struct{}
+	noopScheduler struct{}
 	noopTask      struct {
 		*sync.WaitGroup
 	}
 )
 
-var _ Processor = (*noopProcessor)(nil)
-var _ PriorityTask = (*noopTask)(nil)
+var (
+	_ Scheduler[*noopTask] = (*noopScheduler)(nil)
+	_ Task                 = (*noopTask)(nil)
+)
 
-func BenchmarkInterleavedWeightedRoundRobinScheduler(b *testing.B) {
-	priorityToWeight := map[int]int{
+var (
+	channelKeyToWeight = map[int]int{
 		0: 5,
 		1: 3,
 		2: 2,
 		3: 1,
 	}
+)
+
+func BenchmarkInterleavedWeightedRoundRobinScheduler_Sequential(b *testing.B) {
 	logger := log.NewTestLogger()
-	metricsClient := metrics.NewClient(
-		&metrics.ClientConfig{},
-		tally.NewTestScope("test", nil),
-		metrics.Common,
-	)
 
 	scheduler := NewInterleavedWeightedRoundRobinScheduler(
-		InterleavedWeightedRoundRobinSchedulerOptions{
-			QueueSize:   2,
-			WorkerCount: 1,
+		InterleavedWeightedRoundRobinSchedulerOptions[*noopTask, int]{
+			TaskChannelKeyFn:            func(nt *noopTask) int { return rand.Intn(4) },
+			ChannelWeightFn:             func(key int) int { return channelKeyToWeight[key] },
+			ChannelQuotaRequestFn:       func(key int) quotas.Request { return quotas.NewRequest("", 1, "", "", 0, "") },
+			TaskChannelMetricTagsFn:     func(key int) []metrics.Tag { return nil },
+			EnableRateLimiter:           dynamicconfig.GetBoolPropertyFn(true),
+			EnableRateLimiterShadowMode: dynamicconfig.GetBoolPropertyFn(false),
 		},
-		priorityToWeight,
-		&noopProcessor{},
-		metricsClient,
+		Scheduler[*noopTask](&noopScheduler{}),
+		quotas.NoopRequestRateLimiter,
+		clock.NewRealTimeSource(),
 		logger,
+		metrics.NoopMetricsHandler,
 	)
 	scheduler.Start()
 	defer scheduler.Stop()
@@ -84,17 +91,53 @@ func BenchmarkInterleavedWeightedRoundRobinScheduler(b *testing.B) {
 	waitGroup.Wait()
 }
 
-func (n *noopProcessor) Start()           {}
-func (n *noopProcessor) Stop()            {}
-func (n *noopProcessor) Submit(task Task) { task.Ack() }
+func BenchmarkInterleavedWeightedRoundRobinScheduler_Parallel(b *testing.B) {
+	logger := log.NewTestLogger()
+
+	scheduler := NewInterleavedWeightedRoundRobinScheduler(
+		InterleavedWeightedRoundRobinSchedulerOptions[*noopTask, int]{
+			TaskChannelKeyFn:            func(nt *noopTask) int { return rand.Intn(4) },
+			ChannelWeightFn:             func(key int) int { return channelKeyToWeight[key] },
+			ChannelQuotaRequestFn:       func(key int) quotas.Request { return quotas.NewRequest("", 1, "", "", 0, "") },
+			TaskChannelMetricTagsFn:     func(key int) []metrics.Tag { return nil },
+			EnableRateLimiter:           dynamicconfig.GetBoolPropertyFn(true),
+			EnableRateLimiterShadowMode: dynamicconfig.GetBoolPropertyFn(false),
+		},
+		Scheduler[*noopTask](&noopScheduler{}),
+		quotas.NoopRequestRateLimiter,
+		clock.NewRealTimeSource(),
+		logger,
+		metrics.NoopMetricsHandler,
+	)
+	scheduler.Start()
+	defer scheduler.Stop()
+
+	waitGroup := &sync.WaitGroup{}
+	waitGroup.Add(b.N)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			scheduler.Submit(&noopTask{WaitGroup: waitGroup})
+		}
+	})
+	waitGroup.Wait()
+}
+
+func (n *noopScheduler) Start()                        {}
+func (n *noopScheduler) Stop()                         {}
+func (n *noopScheduler) Submit(task *noopTask)         { task.Ack() }
+func (n *noopScheduler) TrySubmit(task *noopTask) bool { task.Ack(); return true }
 
 func (n *noopTask) Execute() error                   { panic("implement me") }
 func (n *noopTask) HandleErr(err error) error        { panic("implement me") }
 func (n *noopTask) IsRetryableError(err error) bool  { panic("implement me") }
 func (n *noopTask) RetryPolicy() backoff.RetryPolicy { panic("implement me") }
+func (n *noopTask) Abort()                           { panic("implement me") }
+func (n *noopTask) Cancel()                          { panic("implement me") }
 func (n *noopTask) Ack()                             { n.Done() }
-func (n *noopTask) Nack()                            { panic("implement me") }
+func (n *noopTask) Nack(err error)                   { panic("implement me") }
 func (n *noopTask) Reschedule()                      { panic("implement me") }
 func (n *noopTask) State() State                     { panic("implement me") }
-func (n *noopTask) GetPriority() int                 { return 0 }
-func (n *noopTask) SetPriority(i int)                { panic("implement me") }

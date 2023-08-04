@@ -43,6 +43,10 @@ enum TaskCategory {
     TASK_CATEGORY_REPLICATION = 3;
     // Visibility is the task type for visibility task.
     TASK_CATEGORY_VISIBILITY = 4;
+    // Archival is the task type for workflow archival tasks.
+    TASK_CATEGORY_ARCHIVAL = 5;
+    // Memory timer is the task type for in memory timer task. Currently used for speculative workflow task timeouts only.
+    TASK_CATEGORY_MEMORY_TIMER = 6;
 }
 
 enum TaskType {
@@ -69,5 +73,8 @@ enum TaskType {
     TASK_TYPE_VISIBILITY_UPSERT_EXECUTION = 20;
     TASK_TYPE_VISIBILITY_CLOSE_EXECUTION = 21;
     TASK_TYPE_VISIBILITY_DELETE_EXECUTION = 22;
-    TASK_TYPE_TIERED_STORAGE = 23;
+    reserved 23;
+    TASK_TYPE_TRANSFER_DELETE_EXECUTION = 24;
+    TASK_TYPE_REPLICATION_SYNC_WORKFLOW_STATE = 25;
+    TASK_TYPE_ARCHIVAL_ARCHIVE_EXECUTION = 26;
 }

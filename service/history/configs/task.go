@@ -24,42 +24,62 @@
 
 package configs
 
-import "strconv"
-
-const (
-	numBitsPerLevel = 3
+import (
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/log/tag"
+	"go.temporal.io/server/common/tasks"
 )
 
-const (
-	TaskHighPriorityClass = iota << numBitsPerLevel
-	TaskDefaultPriorityClass
-	TaskLowPriorityClass
-)
+var (
+	DefaultActiveTaskPriorityWeight = map[tasks.Priority]int{
+		tasks.PriorityHigh: 10,
+		tasks.PriorityLow:  1,
+	}
 
-const (
-	TaskHighPrioritySubclass = iota
-	TaskDefaultPrioritySubclass
-	TaskLowPrioritySubclass
+	DefaultStandbyTaskPriorityWeight = map[tasks.Priority]int{
+		// we basically treat standby tasks as low prority tasks
+		tasks.PriorityHigh: 1,
+		tasks.PriorityLow:  1,
+	}
 )
-
-var DefaultTaskPriorityWeight = map[int]int{
-	GetTaskPriority(TaskHighPriorityClass, TaskDefaultPrioritySubclass):    200,
-	GetTaskPriority(TaskDefaultPriorityClass, TaskDefaultPrioritySubclass): 100,
-	GetTaskPriority(TaskLowPriorityClass, TaskDefaultPrioritySubclass):     50,
-}
 
 func ConvertWeightsToDynamicConfigValue(
-	weights map[int]int,
+	weights map[tasks.Priority]int,
 ) map[string]interface{} {
 	weightsForDC := make(map[string]interface{})
 	for priority, weight := range weights {
-		weightsForDC[strconv.Itoa(priority)] = weight
+		weightsForDC[priority.String()] = weight
 	}
 	return weightsForDC
 }
 
-func GetTaskPriority(
-	class, subClass int,
-) int {
-	return class | subClass
+func ConvertDynamicConfigValueToWeights(
+	weightsFromDC map[string]interface{},
+	logger log.Logger,
+) map[tasks.Priority]int {
+	weights := make(map[tasks.Priority]int)
+	for key, value := range weightsFromDC {
+		priority, ok := tasks.PriorityValue[key]
+		if !ok {
+			logger.Error("Unknown key for task priority name, fallback to default weights", tag.Key(key), tag.Value(value))
+			return DefaultActiveTaskPriorityWeight
+		}
+
+		var intValue int
+		switch value := value.(type) {
+		case float64:
+			intValue = int(value)
+		case int:
+			intValue = value
+		case int32:
+			intValue = int(value)
+		case int64:
+			intValue = int(value)
+		default:
+			logger.Error("Unknown type for task priority weight, fallback to default weights", tag.Key(key), tag.Value(value))
+			return DefaultActiveTaskPriorityWeight
+		}
+		weights[priority] = intValue
+	}
+	return weights
 }

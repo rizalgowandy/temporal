@@ -29,18 +29,20 @@ import (
 	"time"
 
 	"go.temporal.io/sdk/activity"
-	sdkclient "go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/worker"
 	"go.temporal.io/sdk/workflow"
 
-	"go.temporal.io/server/common"
+	"go.temporal.io/server/api/historyservice/v1"
 	"go.temporal.io/server/common/archiver/provider"
 	"go.temporal.io/server/common/dynamicconfig"
+	"go.temporal.io/server/common/headers"
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/log/tag"
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
+	"go.temporal.io/server/common/primitives"
+	"go.temporal.io/server/common/sdk"
 )
 
 type (
@@ -57,13 +59,14 @@ type (
 
 	// BootstrapContainer contains everything need for bootstrapping
 	BootstrapContainer struct {
-		SdkClient        sdkclient.Client
-		MetricsClient    metrics.Client
+		SdkClientFactory sdk.ClientFactory
+		MetricsHandler   metrics.Handler
 		Logger           log.Logger
 		HistoryV2Manager persistence.ExecutionManager
 		NamespaceCache   namespace.Registry
 		Config           *Config
 		ArchiverProvider provider.ArchiverProvider
+		HistoryClient    historyservice.HistoryServiceClient
 	}
 
 	// Config for ClientWorker
@@ -93,18 +96,22 @@ const (
 )
 
 // these globals exist as a work around because no primitive exists to pass such objects to workflow code
+// TODO: remove these and move to Fx
 var (
-	globalLogger        log.Logger
-	globalMetricsClient metrics.Client
-	globalConfig        *Config
+	globalLogger         log.Logger
+	globalMetricsHandler metrics.Handler
+	globalConfig         *Config
 )
 
 // NewClientWorker returns a new ClientWorker
 func NewClientWorker(container *BootstrapContainer) ClientWorker {
-	globalLogger = log.With(container.Logger, tag.ComponentArchiver, tag.WorkflowNamespace(common.SystemLocalNamespace))
-	globalMetricsClient = container.MetricsClient
+	globalLogger = log.With(container.Logger, tag.ComponentArchiver, tag.WorkflowNamespace(primitives.SystemLocalNamespace))
+	globalMetricsHandler = container.MetricsHandler
 	globalConfig = container.Config
 	actCtx := context.WithValue(context.Background(), bootstrapContainerKey, container)
+	actCtx = headers.SetCallerInfo(actCtx, headers.SystemBackgroundCallerInfo)
+
+	sdkClient := container.SdkClientFactory.GetSystemClient()
 	wo := worker.Options{
 		MaxConcurrentActivityExecutionSize:     container.Config.MaxConcurrentActivityExecutionSize(),
 		MaxConcurrentWorkflowTaskExecutionSize: container.Config.MaxConcurrentWorkflowTaskExecutionSize(),
@@ -113,7 +120,7 @@ func NewClientWorker(container *BootstrapContainer) ClientWorker {
 		BackgroundActivityContext:              actCtx,
 	}
 	clientWorker := &clientWorker{
-		worker:            worker.New(container.SdkClient, workflowTaskQueue, wo),
+		worker:            container.SdkClientFactory.NewWorker(sdkClient, workflowTaskQueue, wo),
 		namespaceRegistry: container.NamespaceCache,
 	}
 

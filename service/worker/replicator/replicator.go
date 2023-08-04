@@ -25,8 +25,11 @@
 package replicator
 
 import (
+	"fmt"
+	"sync"
 	"sync/atomic"
 
+	"go.temporal.io/server/api/matchingservice/v1"
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/cluster"
@@ -45,12 +48,16 @@ type (
 		clusterMetadata                  cluster.Metadata
 		namespaceReplicationTaskExecutor namespace.ReplicationTaskExecutor
 		clientBean                       client.Bean
-		namespaceProcessors              []*namespaceReplicationMessageProcessor
 		logger                           log.Logger
-		metricsClient                    metrics.Client
-		hostInfo                         *membership.HostInfo
+		metricsHandler                   metrics.Handler
+		hostInfo                         membership.HostInfo
 		serviceResolver                  membership.ServiceResolver
 		namespaceReplicationQueue        persistence.NamespaceReplicationQueue
+
+		namespaceProcessorsLock sync.Mutex
+		namespaceProcessors     map[string]*namespaceReplicationMessageProcessor
+		matchingClient          matchingservice.MatchingServiceClient
+		namespaceRegistry       namespace.Registry
 	}
 
 	// Config contains all the replication config for worker
@@ -63,46 +70,27 @@ func NewReplicator(
 	clusterMetadata cluster.Metadata,
 	clientBean client.Bean,
 	logger log.Logger,
-	metricsClient metrics.Client,
-	hostInfo *membership.HostInfo,
+	metricsHandler metrics.Handler,
+	hostInfo membership.HostInfo,
 	serviceResolver membership.ServiceResolver,
 	namespaceReplicationQueue persistence.NamespaceReplicationQueue,
 	namespaceReplicationTaskExecutor namespace.ReplicationTaskExecutor,
+	matchingClient matchingservice.MatchingServiceClient,
+	namespaceRegistry namespace.Registry,
 ) *Replicator {
-
-	logger = log.With(logger, tag.ComponentReplicator)
-	var namespaceReplicationMessageProcessors []*namespaceReplicationMessageProcessor
-	currentClusterName := clusterMetadata.GetCurrentClusterName()
-	for targetClusterName, info := range clusterMetadata.GetAllClusterInfo() {
-		if !info.Enabled {
-			continue
-		}
-
-		if targetClusterName != currentClusterName {
-			namespaceReplicationMessageProcessors = append(namespaceReplicationMessageProcessors, newNamespaceReplicationMessageProcessor(
-				currentClusterName,
-				targetClusterName,
-				log.With(logger, tag.ComponentReplicationTaskProcessor, tag.SourceCluster(targetClusterName)),
-				clientBean.GetRemoteAdminClient(targetClusterName),
-				metricsClient,
-				namespaceReplicationTaskExecutor,
-				hostInfo,
-				serviceResolver,
-				namespaceReplicationQueue,
-			))
-		}
-	}
 	return &Replicator{
 		status:                           common.DaemonStatusInitialized,
 		hostInfo:                         hostInfo,
 		serviceResolver:                  serviceResolver,
 		clusterMetadata:                  clusterMetadata,
 		namespaceReplicationTaskExecutor: namespaceReplicationTaskExecutor,
-		namespaceProcessors:              namespaceReplicationMessageProcessors,
+		namespaceProcessors:              make(map[string]*namespaceReplicationMessageProcessor),
 		clientBean:                       clientBean,
-		logger:                           logger,
-		metricsClient:                    metricsClient,
+		logger:                           log.With(logger, tag.ComponentReplicator),
+		metricsHandler:                   metricsHandler,
 		namespaceReplicationQueue:        namespaceReplicationQueue,
+		matchingClient:                   matchingClient,
+		namespaceRegistry:                namespaceRegistry,
 	}
 }
 
@@ -116,9 +104,7 @@ func (r *Replicator) Start() {
 		return
 	}
 
-	for _, namespaceProcessor := range r.namespaceProcessors {
-		namespaceProcessor.Start()
-	}
+	r.listenToClusterMetadataChange()
 }
 
 // Stop is called to stop replicator
@@ -131,7 +117,58 @@ func (r *Replicator) Stop() {
 		return
 	}
 
+	currentClusterName := r.clusterMetadata.GetCurrentClusterName()
+	r.clusterMetadata.UnRegisterMetadataChangeCallback(currentClusterName)
+	r.namespaceProcessorsLock.Lock()
+	defer r.namespaceProcessorsLock.Unlock()
 	for _, namespaceProcessor := range r.namespaceProcessors {
 		namespaceProcessor.Stop()
 	}
+}
+
+func (r *Replicator) listenToClusterMetadataChange() {
+	r.clusterMetadata.RegisterMetadataChangeCallback(
+		r,
+		func(
+			oldClusterMetadata map[string]*cluster.ClusterInformation,
+			newClusterMetadata map[string]*cluster.ClusterInformation,
+		) {
+			currentClusterName := r.clusterMetadata.GetCurrentClusterName()
+			r.namespaceProcessorsLock.Lock()
+			defer r.namespaceProcessorsLock.Unlock()
+			for clusterName := range newClusterMetadata {
+				if clusterName == currentClusterName {
+					continue
+				}
+				if processor, ok := r.namespaceProcessors[clusterName]; ok {
+					processor.Stop()
+					delete(r.namespaceProcessors, clusterName)
+				}
+
+				if clusterInfo := newClusterMetadata[clusterName]; clusterInfo != nil && clusterInfo.Enabled {
+					remoteAdminClient, err := r.clientBean.GetRemoteAdminClient(clusterName)
+					if err != nil {
+						// Cannot find remote cluster info.
+						// This should never happen as cluster metadata should have the up-to-date data.
+						panic(fmt.Sprintf("Bug found in cluster metadata with error %v", err))
+					}
+					processor := newNamespaceReplicationMessageProcessor(
+						currentClusterName,
+						clusterName,
+						log.With(r.logger, tag.ComponentReplicationTaskProcessor, tag.SourceCluster(clusterName)),
+						remoteAdminClient,
+						r.metricsHandler,
+						r.namespaceReplicationTaskExecutor,
+						r.hostInfo,
+						r.serviceResolver,
+						r.namespaceReplicationQueue,
+						r.matchingClient,
+						r.namespaceRegistry,
+					)
+					processor.Start()
+					r.namespaceProcessors[clusterName] = processor
+				}
+			}
+		},
+	)
 }

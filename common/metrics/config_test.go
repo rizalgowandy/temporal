@@ -28,6 +28,7 @@ import (
 	"testing"
 
 	"github.com/golang/mock/gomock"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"github.com/uber-go/tally/v4"
@@ -35,44 +36,6 @@ import (
 
 	"go.temporal.io/server/common/log"
 )
-
-type nullStatsReporter struct{}
-type unsupportedNullStatsReporter struct{}
-
-var CachedNullStatsReporter tally.CachedStatsReporter = nullStatsReporter{}
-var UnsupportedNullStatsReporter tally.BaseStatsReporter = unsupportedNullStatsReporter{}
-
-func (r nullStatsReporter) Capabilities() tally.Capabilities {
-	panic("implement me")
-}
-
-func (r nullStatsReporter) Flush() {
-	panic("implement me")
-}
-
-func (r nullStatsReporter) AllocateCounter(name string, tags map[string]string) tally.CachedCount {
-	panic("implement me")
-}
-
-func (r nullStatsReporter) AllocateGauge(name string, tags map[string]string) tally.CachedGauge {
-	panic("implement me")
-}
-
-func (r nullStatsReporter) AllocateTimer(name string, tags map[string]string) tally.CachedTimer {
-	panic("implement me")
-}
-
-func (r nullStatsReporter) AllocateHistogram(name string, tags map[string]string, buckets tally.Buckets) tally.CachedHistogram {
-	panic("implement me")
-}
-
-func (u unsupportedNullStatsReporter) Capabilities() tally.Capabilities {
-	panic("implement me")
-}
-
-func (u unsupportedNullStatsReporter) Flush() {
-	panic("implement me")
-}
 
 type MetricsSuite struct {
 	*require.Assertions
@@ -97,7 +60,7 @@ func (s *MetricsSuite) TestStatsd() {
 
 	config := new(Config)
 	config.Statsd = statsd
-	scope := config.NewScope(log.NewNoopLogger())
+	scope := NewScope(log.NewNoopLogger(), config)
 	s.NotNil(scope)
 }
 
@@ -109,7 +72,7 @@ func (s *MetricsSuite) TestM3() {
 	}
 	config := new(Config)
 	config.M3 = m3
-	scope := config.NewScope(log.NewNoopLogger())
+	scope := NewScope(log.NewNoopLogger(), config)
 	s.NotNil(scope)
 }
 
@@ -121,48 +84,131 @@ func (s *MetricsSuite) TestPrometheus() {
 	}
 	config := new(Config)
 	config.Prometheus = prom
-	scope := config.NewScope(log.NewNoopLogger())
+	scope := NewScope(log.NewNoopLogger(), config)
+	s.NotNil(scope)
+}
+
+func (s *MetricsSuite) TestPrometheusWithSanitizeOptions() {
+	validChars := &ValidCharacters{
+		Ranges: []SanitizeRange{
+			{
+				StartRange: "a",
+				EndRange:   "z",
+			},
+			{
+				StartRange: "A",
+				EndRange:   "Z",
+			},
+			{
+				StartRange: "0",
+				EndRange:   "9",
+			},
+		},
+		SafeCharacters: "-",
+	}
+
+	prom := &PrometheusConfig{
+		OnError:       "panic",
+		TimerType:     "histogram",
+		ListenAddress: "127.0.0.1:0",
+		SanitizeOptions: &SanitizeOptions{
+			NameCharacters:       validChars,
+			KeyCharacters:        validChars,
+			ValueCharacters:      validChars,
+			ReplacementCharacter: "_",
+		},
+	}
+	config := new(Config)
+	config.Prometheus = prom
+	scope := NewScope(log.NewNoopLogger(), config)
 	s.NotNil(scope)
 }
 
 func (s *MetricsSuite) TestNoop() {
 	config := &Config{}
-	scope := config.NewScope(log.NewNoopLogger())
+	scope := NewScope(log.NewNoopLogger(), config)
 	s.Equal(tally.NoopScope, scope)
 }
 
-func (s *MetricsSuite) TestCustomReporter() {
-	config := &Config{}
-	scope := config.NewCustomReporterScope(log.NewNoopLogger(), tally.NullStatsReporter)
-	s.NotNil(scope)
-	s.NotEqual(tally.NoopScope, scope)
-}
-
-func (s *MetricsSuite) TestCustomCachedReporter() {
-	config := &Config{}
-	scope := config.NewCustomReporterScope(log.NewNoopLogger(), CachedNullStatsReporter)
-	s.NotNil(scope)
-	s.NotEqual(tally.NoopScope, scope)
-}
-
-func (s *MetricsSuite) TestUnsupportedReporter() {
-	config := &Config{}
-	scope := config.NewCustomReporterScope(log.NewNoopLogger(), UnsupportedNullStatsReporter)
-	s.Equal(tally.NoopScope, scope)
-}
-
-func (s *MetricsSuite) TestOTCustomReporter() {
-	prom := &PrometheusConfig{
-		Framework:     "custom",
-		OnError:       "panic",
-		TimerType:     "histogram",
-		ListenAddress: "127.0.0.1:0",
+func (s *MetricsSuite) TestSetDefaultPerUnitHistogramBoundaries() {
+	type histogramTest struct {
+		input        map[string][]float64
+		expectResult map[string][]float64
 	}
-	config := &Config{}
-	config.Prometheus = prom
-	mockReporter := NewMockReporter(s.controller)
-	reporter, sdkReporter, err := config.InitMetricReporters(log.NewNoopLogger(), mockReporter)
-	s.Equal(mockReporter, reporter)
-	s.Equal(mockReporter, sdkReporter)
-	s.Nil(err)
+
+	customizedBoundaries := map[string][]float64{
+		Dimensionless: {1},
+		Milliseconds:  defaultPerUnitHistogramBoundaries[Milliseconds],
+		Bytes:         defaultPerUnitHistogramBoundaries[Bytes],
+	}
+	testCases := []histogramTest{
+		{
+			input:        nil,
+			expectResult: defaultPerUnitHistogramBoundaries,
+		},
+		{
+			input: map[string][]float64{
+				UnitNameDimensionless: {1},
+				"notDefine":           {1},
+			},
+			expectResult: customizedBoundaries,
+		},
+	}
+
+	for _, test := range testCases {
+		config := &ClientConfig{PerUnitHistogramBoundaries: test.input}
+		setDefaultPerUnitHistogramBoundaries(config)
+		s.Equal(test.expectResult, config.PerUnitHistogramBoundaries)
+	}
+}
+
+func TestMetricsHandlerFromConfig(t *testing.T) {
+	t.Parallel()
+
+	logger := log.NewTestLogger()
+
+	for _, c := range []struct {
+		name         string
+		cfg          *Config
+		expectedType interface{}
+	}{
+		{
+			name:         "nil config",
+			cfg:          nil,
+			expectedType: &noopMetricsHandler{},
+		},
+		{
+			name: "tally",
+			cfg: &Config{
+				Prometheus: &PrometheusConfig{
+					Framework:     FrameworkTally,
+					ListenAddress: "localhost:0",
+				},
+			},
+			expectedType: &tallyMetricsHandler{},
+		},
+		{
+			name: "opentelemetry",
+			cfg: &Config{
+				Prometheus: &PrometheusConfig{
+					Framework:     FrameworkOpentelemetry,
+					ListenAddress: "localhost:0",
+				},
+			},
+			expectedType: &otelMetricsHandler{},
+		},
+	} {
+		c := c
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			handler, err := MetricsHandlerFromConfig(logger, c.cfg)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				handler.Stop(logger)
+			})
+			assert.IsType(t, c.expectedType, handler)
+		})
+	}
+
 }

@@ -32,17 +32,18 @@ import (
 	"strings"
 
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	"go.temporal.io/server/common/persistence/visibility/store"
 )
 
 const (
 	templateCreateWorkflowExecutionStarted = `INSERT INTO executions_visibility (` +
-		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding) ` +
-		`VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding, task_queue) ` +
+		`VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          ON CONFLICT (namespace_id, run_id) DO NOTHING`
 
 	templateCreateWorkflowExecutionClosed = `INSERT INTO executions_visibility (` +
-		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, close_time, status, history_length, memo, encoding) ` +
-		`VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		`namespace_id, workflow_id, run_id, start_time, execution_time, workflow_type_name, close_time, status, history_length, memo, encoding, task_queue) ` +
+		`VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT (namespace_id, run_id) DO UPDATE 
 		  SET workflow_id = excluded.workflow_id,
 		      start_time = excluded.start_time,
@@ -52,7 +53,8 @@ const (
 			  status = excluded.status,
 			  history_length = excluded.history_length,
 			  memo = excluded.memo,
-			  encoding = excluded.encoding`
+			  encoding = excluded.encoding,
+			  task_queue = excluded.task_queue`
 
 	// RunID condition is needed for correct pagination
 	templateConditions1 = ` AND namespace_id = $1
@@ -83,7 +85,7 @@ const (
          ORDER BY close_time DESC, run_id
          LIMIT $8`
 
-	templateOpenFieldNames = `workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding`
+	templateOpenFieldNames = `workflow_id, run_id, start_time, execution_time, workflow_type_name, status, memo, encoding, task_queue`
 	templateOpenSelect     = `SELECT ` + templateOpenFieldNames + ` FROM executions_visibility WHERE status = 1 `
 
 	templateClosedSelect = `SELECT ` + templateOpenFieldNames + `, close_time, history_length
@@ -103,10 +105,26 @@ const (
 
 	templateGetClosedWorkflowExecutionsByStatus = templateClosedSelect + `AND status = $1` + templateConditionsClosedWorkflow2
 
-	templateGetClosedWorkflowExecution = `SELECT workflow_id, run_id, start_time, execution_time, memo, encoding, close_time, workflow_type_name, status, history_length 
+	templateGetClosedWorkflowExecution = `SELECT workflow_id, run_id, start_time, execution_time, memo, encoding, close_time, workflow_type_name, status, history_length, task_queue
 		 FROM executions_visibility
 		 WHERE namespace_id = $1 AND status != 1
 		 AND run_id = $2`
+
+	templateGetWorkflowExecution = `
+		SELECT
+			workflow_id,
+			run_id,
+			start_time,
+			execution_time,
+			memo,
+			encoding,
+			close_time,
+			workflow_type_name,
+			status,
+			history_length,
+			task_queue
+		FROM executions_visibility
+		WHERE namespace_id = $1 AND run_id = $2`
 
 	templateDeleteWorkflowExecution = "DELETE FROM executions_visibility WHERE namespace_id = $1 AND run_id = $2"
 )
@@ -120,6 +138,7 @@ func (pdb *db) InsertIntoVisibility(
 	row *sqlplugin.VisibilityRow,
 ) (sql.Result, error) {
 	row.StartTime = pdb.converter.ToPostgreSQLDateTime(row.StartTime)
+	row.ExecutionTime = pdb.converter.ToPostgreSQLDateTime(row.ExecutionTime)
 	return pdb.conn.ExecContext(ctx,
 		templateCreateWorkflowExecutionStarted,
 		row.NamespaceID,
@@ -131,6 +150,7 @@ func (pdb *db) InsertIntoVisibility(
 		row.Status,
 		row.Memo,
 		row.Encoding,
+		row.TaskQueue,
 	)
 }
 
@@ -142,6 +162,7 @@ func (pdb *db) ReplaceIntoVisibility(
 	switch {
 	case row.CloseTime != nil && row.HistoryLength != nil:
 		row.StartTime = pdb.converter.ToPostgreSQLDateTime(row.StartTime)
+		row.ExecutionTime = pdb.converter.ToPostgreSQLDateTime(row.ExecutionTime)
 		closeTime := pdb.converter.ToPostgreSQLDateTime(*row.CloseTime)
 		return pdb.conn.ExecContext(ctx,
 			templateCreateWorkflowExecutionClosed,
@@ -156,6 +177,7 @@ func (pdb *db) ReplaceIntoVisibility(
 			*row.HistoryLength,
 			row.Memo,
 			row.Encoding,
+			row.TaskQueue,
 		)
 	default:
 		return nil, errCloseParams
@@ -271,15 +293,52 @@ func (pdb *db) SelectFromVisibility(
 		return nil, err
 	}
 	for i := range rows {
-		rows[i].StartTime = pdb.converter.FromPostgreSQLDateTime(rows[i].StartTime)
-		rows[i].ExecutionTime = pdb.converter.FromPostgreSQLDateTime(rows[i].ExecutionTime)
-		if rows[i].CloseTime != nil {
-			closeTime := pdb.converter.FromPostgreSQLDateTime(*rows[i].CloseTime)
-			rows[i].CloseTime = &closeTime
-		}
-		// need to trim the run ID, or otherwise the returned value will
-		//  come with lots of trailing spaces, probably due to the CHAR(64) type
-		rows[i].RunID = strings.TrimSpace(rows[i].RunID)
+		pdb.processRowFromDB(&rows[i])
 	}
 	return rows, nil
+}
+
+// GetFromVisibility reads one row from visibility table
+func (pdb *db) GetFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilityGetFilter,
+) (*sqlplugin.VisibilityRow, error) {
+	var row sqlplugin.VisibilityRow
+	err := pdb.conn.GetContext(ctx,
+		&row,
+		templateGetWorkflowExecution,
+		filter.NamespaceID,
+		filter.RunID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	pdb.processRowFromDB(&row)
+	return &row, nil
+}
+
+func (pdb *db) CountFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilitySelectFilter,
+) (int64, error) {
+	return 0, store.OperationNotSupportedErr
+}
+
+func (pdb *db) CountGroupByFromVisibility(
+	ctx context.Context,
+	filter sqlplugin.VisibilitySelectFilter,
+) ([]sqlplugin.VisibilityCountRow, error) {
+	return nil, store.OperationNotSupportedErr
+}
+
+func (pdb *db) processRowFromDB(row *sqlplugin.VisibilityRow) {
+	row.StartTime = pdb.converter.FromPostgreSQLDateTime(row.StartTime)
+	row.ExecutionTime = pdb.converter.FromPostgreSQLDateTime(row.ExecutionTime)
+	if row.CloseTime != nil {
+		closeTime := pdb.converter.FromPostgreSQLDateTime(*row.CloseTime)
+		row.CloseTime = &closeTime
+	}
+	// need to trim the run ID, or otherwise the returned value will
+	//  come with lots of trailing spaces, probably due to the CHAR(64) type
+	row.RunID = strings.TrimSpace(row.RunID)
 }

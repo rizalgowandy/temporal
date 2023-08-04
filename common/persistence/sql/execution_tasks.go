@@ -25,155 +25,403 @@
 package sql
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"time"
 
-	commonpb "go.temporal.io/api/common/v1"
 	"go.temporal.io/api/serviceerror"
 
-	"go.temporal.io/server/common/collection"
-	"go.temporal.io/server/common/persistence"
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/serialization"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
+	"go.temporal.io/server/service/history/tasks"
 )
 
-func (m *sqlExecutionStore) AddTasks(
-	request *p.InternalAddTasksRequest,
+func (m *sqlExecutionStore) RegisterHistoryTaskReader(
+	_ context.Context,
+	_ *p.RegisterHistoryTaskReaderRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+	// no-op
+	return nil
+}
+
+func (m *sqlExecutionStore) UnregisterHistoryTaskReader(
+	_ context.Context,
+	_ *p.UnregisterHistoryTaskReaderRequest,
+) {
+	// no-op
+}
+
+func (m *sqlExecutionStore) UpdateHistoryTaskReaderProgress(
+	_ context.Context,
+	_ *p.UpdateHistoryTaskReaderProgressRequest,
+) {
+	// no-op
+}
+
+func (m *sqlExecutionStore) AddHistoryTasks(
+	ctx context.Context,
+	request *p.InternalAddHistoryTasksRequest,
+) error {
 	return m.txExecuteShardLocked(ctx,
-		"AddTasks",
+		"AddHistoryTasks",
 		request.ShardID,
 		request.RangeID,
 		func(tx sqlplugin.Tx) error {
 			return applyTasks(ctx,
 				tx,
 				request.ShardID,
-				request.TransferTasks,
-				request.TimerTasks,
-				request.ReplicationTasks,
-				request.VisibilityTasks,
+				request.Tasks,
 			)
 		})
 }
 
-func (m *sqlExecutionStore) GetTransferTask(
-	request *persistence.GetTransferTaskRequest,
-) (*persistence.InternalGetTransferTaskResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.SelectFromTransferTasks(ctx, sqlplugin.TransferTasksFilter{
-		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
+func (m *sqlExecutionStore) GetHistoryTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	switch request.TaskCategory.Type() {
+	case tasks.CategoryTypeImmediate:
+		return m.getHistoryImmediateTasks(ctx, request)
+	case tasks.CategoryTypeScheduled:
+		return m.getHistoryScheduledTasks(ctx, request)
+	default:
+		return nil, serviceerror.NewInternal(fmt.Sprintf("Unknown task category type: %v", request.TaskCategory))
+	}
+}
+
+func (m *sqlExecutionStore) CompleteHistoryTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
+) error {
+	switch request.TaskCategory.Type() {
+	case tasks.CategoryTypeImmediate:
+		return m.completeHistoryImmediateTask(ctx, request)
+	case tasks.CategoryTypeScheduled:
+		return m.completeHistoryScheduledTask(ctx, request)
+	default:
+		return serviceerror.NewInternal(fmt.Sprintf("Unknown task category type: %v", request.TaskCategory))
+	}
+}
+
+func (m *sqlExecutionStore) RangeCompleteHistoryTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
+) error {
+	switch request.TaskCategory.Type() {
+	case tasks.CategoryTypeImmediate:
+		return m.rangeCompleteHistoryImmediateTasks(ctx, request)
+	case tasks.CategoryTypeScheduled:
+		return m.rangeCompleteHistoryScheduledTasks(ctx, request)
+	default:
+		return serviceerror.NewInternal(fmt.Sprintf("Unknown task category type: %v", request.TaskCategory))
+	}
+}
+
+func (m *sqlExecutionStore) getHistoryImmediateTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_immediate_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	switch categoryID {
+	case tasks.CategoryIDTransfer:
+		return m.getTransferTasks(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return m.getVisibilityTasks(ctx, request)
+	case tasks.CategoryIDReplication:
+		return m.getReplicationTasks(ctx, request)
+	}
+
+	inclusiveMinTaskID, exclusiveMaxTaskID, err := getImmediateTaskReadRange(request)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := m.Db.RangeSelectFromHistoryImmediateTasks(ctx, sqlplugin.HistoryImmediateTasksRangeFilter{
+		ShardID:            request.ShardID,
+		CategoryID:         categoryID,
+		InclusiveMinTaskID: inclusiveMinTaskID,
+		ExclusiveMaxTaskID: exclusiveMaxTaskID,
+		PageSize:           request.BatchSize,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTransferTask operation failed. Task with ID %v not found. Error: %v", request.TaskID, err))
+		if err != sql.ErrNoRows {
+			return nil, serviceerror.NewUnavailable(
+				fmt.Sprintf("GetHistoryTasks operation failed. Select failed. CategoryID: %v. Error: %v", categoryID, err),
+			)
 		}
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTransferTask operation failed. Failed to get record. TaskId: %v. Error: %v", request.TaskID, err))
 	}
-
+	resp := &p.InternalGetHistoryTasksResponse{
+		Tasks: make([]p.InternalHistoryTask, len(rows)),
+	}
 	if len(rows) == 0 {
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTransferTask operation failed. Failed to get record. TaskId: %v", request.TaskID))
+		return resp, nil
 	}
 
-	transferRow := rows[0]
-	resp := &persistence.InternalGetTransferTaskResponse{
-		Task: *persistence.NewDataBlob(transferRow.Data, transferRow.DataEncoding),
+	for i, row := range rows {
+		resp.Tasks[i] = p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		}
 	}
+	if len(rows) == request.BatchSize {
+		resp.NextPageToken = getImmediateTaskNextPageToken(
+			rows[len(rows)-1].TaskID,
+			exclusiveMaxTaskID,
+		)
+	}
+
 	return resp, nil
 }
 
-func (m *sqlExecutionStore) GetTransferTasks(
-	request *p.GetTransferTasksRequest,
-) (*p.InternalGetTransferTasksResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (m *sqlExecutionStore) completeHistoryImmediateTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
+) error {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_immediate_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	switch categoryID {
+	case tasks.CategoryIDTransfer:
+		return m.completeTransferTask(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return m.completeVisibilityTask(ctx, request)
+	case tasks.CategoryIDReplication:
+		return m.completeReplicationTask(ctx, request)
+	}
+
+	if _, err := m.Db.DeleteFromHistoryImmediateTasks(ctx, sqlplugin.HistoryImmediateTasksFilter{
+		ShardID:    request.ShardID,
+		CategoryID: categoryID,
+		TaskID:     request.TaskKey.TaskID,
+	}); err != nil {
+		return serviceerror.NewUnavailable(
+			fmt.Sprintf("CompleteHistoryTask operation failed. CategoryID: %v. Error: %v", categoryID, err),
+		)
+	}
+	return nil
+}
+
+func (m *sqlExecutionStore) rangeCompleteHistoryImmediateTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
+) error {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_immediate_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	switch categoryID {
+	case tasks.CategoryIDTransfer:
+		return m.rangeCompleteTransferTasks(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return m.rangeCompleteVisibilityTasks(ctx, request)
+	case tasks.CategoryIDReplication:
+		return m.rangeCompleteReplicationTasks(ctx, request)
+	}
+
+	if _, err := m.Db.RangeDeleteFromHistoryImmediateTasks(ctx, sqlplugin.HistoryImmediateTasksRangeFilter{
+		ShardID:            request.ShardID,
+		CategoryID:         categoryID,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: request.ExclusiveMaxTaskKey.TaskID,
+	}); err != nil {
+		return serviceerror.NewUnavailable(
+			fmt.Sprintf("RangeCompleteTransferTask operation failed. CategoryID: %v. Error: %v", categoryID, err),
+		)
+	}
+	return nil
+}
+
+func (m *sqlExecutionStore) getHistoryScheduledTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_scheduled_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	if categoryID == tasks.CategoryIDTimer {
+		return m.getTimerTasks(ctx, request)
+	}
+
+	pageToken := &scheduledTaskPageToken{TaskID: math.MinInt64, Timestamp: request.InclusiveMinTaskKey.FireTime}
+	if len(request.NextPageToken) > 0 {
+		if err := pageToken.deserialize(request.NextPageToken); err != nil {
+			return nil, serviceerror.NewInternal(
+				fmt.Sprintf("categoryID: %v. error deserializing scheduledTaskPageToken: %v", categoryID, err),
+			)
+		}
+	}
+
+	rows, err := m.Db.RangeSelectFromHistoryScheduledTasks(ctx, sqlplugin.HistoryScheduledTasksRangeFilter{
+		ShardID:                         request.ShardID,
+		CategoryID:                      categoryID,
+		InclusiveMinVisibilityTimestamp: pageToken.Timestamp,
+		InclusiveMinTaskID:              pageToken.TaskID,
+		ExclusiveMaxVisibilityTimestamp: request.ExclusiveMaxTaskKey.FireTime,
+		PageSize:                        request.BatchSize,
+	})
+
+	if err != nil && err != sql.ErrNoRows {
+		return nil, serviceerror.NewUnavailable(
+			fmt.Sprintf("GetHistoryTasks operation failed. Select failed. CategoryID: %v. Error: %v", categoryID, err),
+		)
+	}
+
+	resp := &p.InternalGetHistoryTasksResponse{Tasks: make([]p.InternalHistoryTask, 0, len(rows))}
+	for _, row := range rows {
+		resp.Tasks = append(resp.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewKey(row.VisibilityTimestamp, row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		})
+	}
+
+	if len(resp.Tasks) == request.BatchSize {
+		pageToken = &scheduledTaskPageToken{
+			TaskID:    rows[request.BatchSize-1].TaskID + 1,
+			Timestamp: rows[request.BatchSize-1].VisibilityTimestamp,
+		}
+		nextToken, err := pageToken.serialize()
+		if err != nil {
+			return nil, serviceerror.NewInternal(fmt.Sprintf("GetHistoryTasks: error serializing page token: %v", err))
+		}
+		resp.NextPageToken = nextToken
+	}
+
+	return resp, nil
+}
+
+func (m *sqlExecutionStore) completeHistoryScheduledTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
+) error {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_scheduled_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	if categoryID == tasks.CategoryIDTimer {
+		return m.completeTimerTask(ctx, request)
+	}
+
+	if _, err := m.Db.DeleteFromHistoryScheduledTasks(ctx, sqlplugin.HistoryScheduledTasksFilter{
+		ShardID:             request.ShardID,
+		CategoryID:          categoryID,
+		VisibilityTimestamp: request.TaskKey.FireTime,
+		TaskID:              request.TaskKey.TaskID,
+	}); err != nil {
+		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteHistoryTask operation failed. CategoryID: %v. Error: %v", categoryID, err))
+	}
+	return nil
+}
+
+func (m *sqlExecutionStore) rangeCompleteHistoryScheduledTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
+) error {
+	// This is for backward compatiblity.
+	// These task categories exist before the general history_scheduled_tasks table is created,
+	// so they have their own tables.
+	categoryID := request.TaskCategory.ID()
+	if categoryID == tasks.CategoryIDTimer {
+		return m.rangeCompleteTimerTasks(ctx, request)
+	}
+
+	start := request.InclusiveMinTaskKey.FireTime
+	end := request.ExclusiveMaxTaskKey.FireTime
+	if _, err := m.Db.RangeDeleteFromHistoryScheduledTasks(ctx, sqlplugin.HistoryScheduledTasksRangeFilter{
+		ShardID:                         request.ShardID,
+		CategoryID:                      categoryID,
+		InclusiveMinVisibilityTimestamp: start,
+		ExclusiveMaxVisibilityTimestamp: end,
+	}); err != nil {
+		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteHistoryTask operation failed. CategoryID: %v. Error: %v", categoryID, err))
+	}
+	return nil
+}
+
+func (m *sqlExecutionStore) getTransferTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	inclusiveMinTaskID, exclusiveMaxTaskID, err := getImmediateTaskReadRange(request)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := m.Db.RangeSelectFromTransferTasks(ctx, sqlplugin.TransferTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.ReadLevel,
-		MaxTaskID: request.MaxReadLevel,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: inclusiveMinTaskID,
+		ExclusiveMaxTaskID: exclusiveMaxTaskID,
+		PageSize:           request.BatchSize,
 	})
 	if err != nil {
 		if err != sql.ErrNoRows {
 			return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTransferTasks operation failed. Select failed. Error: %v", err))
 		}
 	}
-	resp := &p.InternalGetTransferTasksResponse{Tasks: make([]commonpb.DataBlob, len(rows))}
-	for i, row := range rows {
-		resp.Tasks[i] = *persistence.NewDataBlob(row.Data, row.DataEncoding)
+	resp := &p.InternalGetHistoryTasksResponse{
+		Tasks: make([]p.InternalHistoryTask, len(rows)),
 	}
+	if len(rows) == 0 {
+		return resp, nil
+	}
+
+	for i, row := range rows {
+		resp.Tasks[i] = p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		}
+	}
+	if len(rows) == request.BatchSize {
+		resp.NextPageToken = getImmediateTaskNextPageToken(
+			rows[len(rows)-1].TaskID,
+			exclusiveMaxTaskID,
+		)
+	}
+
 	return resp, nil
 }
 
-func (m *sqlExecutionStore) CompleteTransferTask(
-	request *p.CompleteTransferTaskRequest,
+func (m *sqlExecutionStore) completeTransferTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.DeleteFromTransferTasks(ctx, sqlplugin.TransferTasksFilter{
 		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
+		TaskID:  request.TaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteTransferTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) RangeCompleteTransferTask(
-	request *p.RangeCompleteTransferTaskRequest,
+func (m *sqlExecutionStore) rangeCompleteTransferTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.RangeDeleteFromTransferTasks(ctx, sqlplugin.TransferTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.ExclusiveBeginTaskID,
-		MaxTaskID: request.InclusiveEndTaskID,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: request.ExclusiveMaxTaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteTransferTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) GetTimerTask(
-	request *persistence.GetTimerTaskRequest,
-) (*persistence.InternalGetTimerTaskResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.SelectFromTimerTasks(ctx, sqlplugin.TimerTasksFilter{
-		ShardID:             request.ShardID,
-		TaskID:              request.TaskID,
-		VisibilityTimestamp: request.VisibilityTimestamp,
-	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTimerTask operation failed. Task with ID %v not found. Error: %v", request.TaskID, err))
-		}
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTimerTask operation failed. Failed to get record. TaskId: %v. Error: %v", request.TaskID, err))
-	}
-
-	if len(rows) == 0 {
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTimerTask operation failed. Failed to get record. TaskId: %v", request.TaskID))
-	}
-
-	timerRow := rows[0]
-	resp := &persistence.InternalGetTimerTaskResponse{
-		Task: *p.NewDataBlob(timerRow.Data, timerRow.DataEncoding),
-	}
-	return resp, nil
-}
-
-func (m *sqlExecutionStore) GetTimerTasks(
-	request *p.GetTimerTasksRequest,
-) (*p.InternalGetTimerTasksResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	pageToken := &timerTaskPageToken{TaskID: math.MinInt64, Timestamp: request.MinTimestamp}
+func (m *sqlExecutionStore) getTimerTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	pageToken := &scheduledTaskPageToken{TaskID: math.MinInt64, Timestamp: request.InclusiveMinTaskKey.FireTime}
 	if len(request.NextPageToken) > 0 {
 		if err := pageToken.deserialize(request.NextPageToken); err != nil {
 			return nil, serviceerror.NewInternal(fmt.Sprintf("error deserializing timerTaskPageToken: %v", err))
@@ -181,30 +429,30 @@ func (m *sqlExecutionStore) GetTimerTasks(
 	}
 
 	rows, err := m.Db.RangeSelectFromTimerTasks(ctx, sqlplugin.TimerTasksRangeFilter{
-		ShardID:                request.ShardID,
-		MinVisibilityTimestamp: pageToken.Timestamp,
-		TaskID:                 pageToken.TaskID,
-		MaxVisibilityTimestamp: request.MaxTimestamp,
-		PageSize:               request.BatchSize + 1,
+		ShardID:                         request.ShardID,
+		InclusiveMinVisibilityTimestamp: pageToken.Timestamp,
+		InclusiveMinTaskID:              pageToken.TaskID,
+		ExclusiveMaxVisibilityTimestamp: request.ExclusiveMaxTaskKey.FireTime,
+		PageSize:                        request.BatchSize,
 	})
 
 	if err != nil && err != sql.ErrNoRows {
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTimerTasks operation failed. Select failed. Error: %v", err))
 	}
 
-	resp := &p.InternalGetTimerTasksResponse{Tasks: make([]commonpb.DataBlob, len(rows))}
-	for i, row := range rows {
-		resp.Tasks[i] = *p.NewDataBlob(row.Data, row.DataEncoding)
+	resp := &p.InternalGetHistoryTasksResponse{Tasks: make([]p.InternalHistoryTask, 0, len(rows))}
+	for _, row := range rows {
+		resp.Tasks = append(resp.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewKey(row.VisibilityTimestamp, row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		})
 	}
 
-	// above use page size + 1 for query, so if this check is true
-	// there is definitely a next page
-	if len(resp.Tasks) > request.BatchSize {
-		pageToken = &timerTaskPageToken{
-			TaskID:    rows[request.BatchSize].TaskID,
-			Timestamp: rows[request.BatchSize].VisibilityTimestamp,
+	if len(resp.Tasks) == request.BatchSize {
+		pageToken = &scheduledTaskPageToken{
+			TaskID:    rows[request.BatchSize-1].TaskID + 1,
+			Timestamp: rows[request.BatchSize-1].VisibilityTimestamp,
 		}
-		resp.Tasks = resp.Tasks[:request.BatchSize]
 		nextToken, err := pageToken.serialize()
 		if err != nil {
 			return nil, serviceerror.NewInternal(fmt.Sprintf("GetTimerTasks: error serializing page token: %v", err))
@@ -215,174 +463,166 @@ func (m *sqlExecutionStore) GetTimerTasks(
 	return resp, nil
 }
 
-func (m *sqlExecutionStore) CompleteTimerTask(
-	request *p.CompleteTimerTaskRequest,
+func (m *sqlExecutionStore) completeTimerTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.DeleteFromTimerTasks(ctx, sqlplugin.TimerTasksFilter{
 		ShardID:             request.ShardID,
-		VisibilityTimestamp: request.VisibilityTimestamp,
-		TaskID:              request.TaskID,
+		VisibilityTimestamp: request.TaskKey.FireTime,
+		TaskID:              request.TaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteTimerTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) RangeCompleteTimerTask(
-	request *p.RangeCompleteTimerTaskRequest,
+func (m *sqlExecutionStore) rangeCompleteTimerTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	start := request.InclusiveBeginTimestamp
-	end := request.ExclusiveEndTimestamp
+	start := request.InclusiveMinTaskKey.FireTime
+	end := request.ExclusiveMaxTaskKey.FireTime
 	if _, err := m.Db.RangeDeleteFromTimerTasks(ctx, sqlplugin.TimerTasksRangeFilter{
-		ShardID:                request.ShardID,
-		MinVisibilityTimestamp: start,
-		MaxVisibilityTimestamp: end,
+		ShardID:                         request.ShardID,
+		InclusiveMinVisibilityTimestamp: start,
+		ExclusiveMaxVisibilityTimestamp: end,
 	}); err != nil {
-		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteTimerTask operation failed. Error: %v", err))
+		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteTimerTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) GetReplicationTask(
-	request *persistence.GetReplicationTaskRequest,
-) (*persistence.InternalGetReplicationTaskResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.SelectFromReplicationTasks(ctx, sqlplugin.ReplicationTasksFilter{
-		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
-	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, serviceerror.NewNotFound(fmt.Sprintf("GetReplicationTask operation failed. Task with ID %v not found. Error: %v", request.TaskID, err))
-		}
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetReplicationTask operation failed. Failed to get record. TaskId: %v. Error: %v", request.TaskID, err))
-	}
-
-	if len(rows) == 0 {
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("GetReplicationTask operation failed. Failed to get record. TaskId: %v", request.TaskID))
-	}
-
-	replicationRow := rows[0]
-	resp := &persistence.InternalGetReplicationTaskResponse{Task: *p.NewDataBlob(replicationRow.Data, replicationRow.DataEncoding)}
-	return resp, nil
-}
-
-func (m *sqlExecutionStore) GetReplicationTasks(
-	request *p.GetReplicationTasksRequest,
-) (*p.InternalGetReplicationTasksResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	readLevel, maxReadLevelInclusive, err := getReadLevels(request)
+func (m *sqlExecutionStore) getReplicationTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	inclusiveMinTaskID, exclusiveMaxTaskID, err := getImmediateTaskReadRange(request)
 	if err != nil {
 		return nil, err
 	}
 
 	rows, err := m.Db.RangeSelectFromReplicationTasks(ctx, sqlplugin.ReplicationTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: readLevel,
-		MaxTaskID: maxReadLevelInclusive,
-		PageSize:  request.BatchSize,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: inclusiveMinTaskID,
+		ExclusiveMaxTaskID: exclusiveMaxTaskID,
+		PageSize:           request.BatchSize,
 	})
 
 	switch err {
 	case nil:
-		return m.populateGetReplicationTasksResponse(rows, request.MaxTaskID)
+		return m.populateGetReplicationTasksResponse(rows, request.ExclusiveMaxTaskKey.TaskID, request.BatchSize)
 	case sql.ErrNoRows:
-		return &p.InternalGetReplicationTasksResponse{}, nil
+		return &p.InternalGetHistoryTasksResponse{}, nil
 	default:
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetReplicationTasks operation failed. Select failed: %v", err))
 	}
 }
 
-func getReadLevels(
-	request *p.GetReplicationTasksRequest,
-) (readLevel int64, maxReadLevelInclusive int64, err error) {
-	readLevel = request.MinTaskID
+func getImmediateTaskReadRange(
+	request *p.GetHistoryTasksRequest,
+) (inclusiveMinTaskID int64, exclusiveMaxTaskID int64, err error) {
+	inclusiveMinTaskID = request.InclusiveMinTaskKey.TaskID
 	if len(request.NextPageToken) > 0 {
-		readLevel, err = deserializePageToken(request.NextPageToken)
+		inclusiveMinTaskID, err = deserializePageToken(request.NextPageToken)
 		if err != nil {
 			return 0, 0, err
 		}
 	}
 
-	maxReadLevelInclusive = collection.MaxInt64(readLevel+int64(request.BatchSize), request.MaxTaskID)
-	return readLevel, maxReadLevelInclusive, nil
+	return inclusiveMinTaskID, request.ExclusiveMaxTaskKey.TaskID, nil
+}
+
+func getImmediateTaskNextPageToken(
+	lastTaskID int64,
+	exclusiveMaxTaskID int64,
+) []byte {
+	nextTaskID := lastTaskID + 1
+	if nextTaskID < exclusiveMaxTaskID {
+		return serializePageToken(nextTaskID)
+	}
+	return nil
 }
 
 func (m *sqlExecutionStore) populateGetReplicationTasksResponse(
 	rows []sqlplugin.ReplicationTasksRow,
-	requestMaxReadLevel int64,
-) (*p.InternalGetReplicationTasksResponse, error) {
+	exclusiveMaxTaskID int64,
+	batchSize int,
+) (*p.InternalGetHistoryTasksResponse, error) {
 	if len(rows) == 0 {
-		return &p.InternalGetReplicationTasksResponse{}, nil
+		return &p.InternalGetHistoryTasksResponse{}, nil
 	}
 
-	var tasks = make([]commonpb.DataBlob, len(rows))
+	var replicationTasks = make([]p.InternalHistoryTask, len(rows))
 	for i, row := range rows {
-		tasks[i] = *p.NewDataBlob(row.Data, row.DataEncoding)
+		replicationTasks[i] = p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		}
 	}
 	var nextPageToken []byte
-	lastTaskID := rows[len(rows)-1].TaskID
-	if lastTaskID < requestMaxReadLevel {
-		nextPageToken = serializePageToken(lastTaskID)
+	if len(rows) == batchSize {
+		nextPageToken = getImmediateTaskNextPageToken(
+			rows[len(rows)-1].TaskID,
+			exclusiveMaxTaskID,
+		)
 	}
-	return &p.InternalGetReplicationTasksResponse{
-		Tasks:         tasks,
+	return &p.InternalGetHistoryTasksResponse{
+		Tasks:         replicationTasks,
 		NextPageToken: nextPageToken,
 	}, nil
 }
 
 func (m *sqlExecutionStore) populateGetReplicationDLQTasksResponse(
 	rows []sqlplugin.ReplicationDLQTasksRow,
-	requestMaxReadLevel int64,
-) (*p.InternalGetReplicationTasksResponse, error) {
+	exclusiveMaxTaskID int64,
+	batchSize int,
+) (*p.InternalGetHistoryTasksResponse, error) {
 	if len(rows) == 0 {
-		return &p.InternalGetReplicationTasksResponse{}, nil
+		return &p.InternalGetHistoryTasksResponse{}, nil
 	}
 
-	var tasks = make([]commonpb.DataBlob, len(rows))
+	var dlqTasks = make([]p.InternalHistoryTask, len(rows))
 	for i, row := range rows {
-		tasks[i] = *p.NewDataBlob(row.Data, row.DataEncoding)
+		dlqTasks[i] = p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		}
 	}
 	var nextPageToken []byte
-	lastTaskID := rows[len(rows)-1].TaskID
-	if lastTaskID < requestMaxReadLevel {
-		nextPageToken = serializePageToken(lastTaskID)
+	if len(rows) == batchSize {
+		nextPageToken = getImmediateTaskNextPageToken(
+			rows[len(rows)-1].TaskID,
+			exclusiveMaxTaskID,
+		)
 	}
-	return &p.InternalGetReplicationTasksResponse{
-		Tasks:         tasks,
+	return &p.InternalGetHistoryTasksResponse{
+		Tasks:         dlqTasks,
 		NextPageToken: nextPageToken,
 	}, nil
 }
 
-func (m *sqlExecutionStore) CompleteReplicationTask(
-	request *p.CompleteReplicationTaskRequest,
+func (m *sqlExecutionStore) completeReplicationTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.DeleteFromReplicationTasks(ctx, sqlplugin.ReplicationTasksFilter{
 		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
+		TaskID:  request.TaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteReplicationTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) RangeCompleteReplicationTask(
-	request *p.RangeCompleteReplicationTaskRequest,
+func (m *sqlExecutionStore) rangeCompleteReplicationTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.RangeDeleteFromReplicationTasks(ctx, sqlplugin.ReplicationTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: 0,
-		MaxTaskID: request.InclusiveEndTaskID,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: request.ExclusiveMaxTaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteReplicationTask operation failed. Error: %v", err))
 	}
@@ -390,10 +630,9 @@ func (m *sqlExecutionStore) RangeCompleteReplicationTask(
 }
 
 func (m *sqlExecutionStore) PutReplicationTaskToDLQ(
+	ctx context.Context,
 	request *p.PutReplicationTaskToDLQRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	replicationTask := request.TaskInfo
 	blob, err := serialization.ReplicationTaskInfoToBlob(replicationTask)
 
@@ -419,41 +658,39 @@ func (m *sqlExecutionStore) PutReplicationTaskToDLQ(
 }
 
 func (m *sqlExecutionStore) GetReplicationTasksFromDLQ(
+	ctx context.Context,
 	request *p.GetReplicationTasksFromDLQRequest,
-) (*p.InternalGetReplicationTasksFromDLQResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	readLevel, maxReadLevelInclusive, err := getReadLevels(&request.GetReplicationTasksRequest)
+) (*p.InternalGetHistoryTasksResponse, error) {
+	inclusiveMinTaskID, exclusiveMaxTaskID, err := getImmediateTaskReadRange(&request.GetHistoryTasksRequest)
 	if err != nil {
 		return nil, err
 	}
 
 	rows, err := m.Db.RangeSelectFromReplicationDLQTasks(ctx, sqlplugin.ReplicationDLQTasksRangeFilter{
-		ShardID:           request.ShardID,
-		MinTaskID:         readLevel,
-		MaxTaskID:         maxReadLevelInclusive,
-		PageSize:          request.BatchSize,
-		SourceClusterName: request.SourceClusterName,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: inclusiveMinTaskID,
+		ExclusiveMaxTaskID: exclusiveMaxTaskID,
+		PageSize:           request.BatchSize,
+		SourceClusterName:  request.SourceClusterName,
 	})
 
 	switch err {
 	case nil:
-		return m.populateGetReplicationDLQTasksResponse(rows, request.MaxTaskID)
+		return m.populateGetReplicationDLQTasksResponse(rows, request.ExclusiveMaxTaskKey.TaskID, request.BatchSize)
 	case sql.ErrNoRows:
-		return &p.InternalGetReplicationTasksResponse{}, nil
+		return &p.InternalGetHistoryTasksResponse{}, nil
 	default:
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetReplicationTasks operation failed. Select failed: %v", err))
 	}
 }
 
 func (m *sqlExecutionStore) DeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *p.DeleteReplicationTaskFromDLQRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.DeleteFromReplicationDLQTasks(ctx, sqlplugin.ReplicationDLQTasksFilter{
 		ShardID:           request.ShardID,
-		TaskID:            request.TaskID,
+		TaskID:            request.TaskKey.TaskID,
 		SourceClusterName: request.SourceClusterName,
 	}); err != nil {
 		return err
@@ -462,182 +699,120 @@ func (m *sqlExecutionStore) DeleteReplicationTaskFromDLQ(
 }
 
 func (m *sqlExecutionStore) RangeDeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *p.RangeDeleteReplicationTaskFromDLQRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.RangeDeleteFromReplicationDLQTasks(ctx, sqlplugin.ReplicationDLQTasksRangeFilter{
-		ShardID:           request.ShardID,
-		SourceClusterName: request.SourceClusterName,
-		MinTaskID:         request.ExclusiveBeginTaskID,
-		MaxTaskID:         request.InclusiveEndTaskID,
+		ShardID:            request.ShardID,
+		SourceClusterName:  request.SourceClusterName,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: request.ExclusiveMaxTaskKey.TaskID,
 	}); err != nil {
 		return err
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) GetVisibilityTask(
-	request *persistence.GetVisibilityTaskRequest,
-) (*persistence.InternalGetVisibilityTaskResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.SelectFromVisibilityTasks(ctx, sqlplugin.VisibilityTasksFilter{
-		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
+func (m *sqlExecutionStore) IsReplicationDLQEmpty(
+	ctx context.Context,
+	request *p.GetReplicationTasksFromDLQRequest,
+) (bool, error) {
+	res, err := m.Db.RangeSelectFromReplicationDLQTasks(ctx, sqlplugin.ReplicationDLQTasksRangeFilter{
+		ShardID:            request.ShardID,
+		SourceClusterName:  request.SourceClusterName,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: math.MaxInt64,
+		PageSize:           1,
 	})
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, serviceerror.NewNotFound(fmt.Sprintf("GetVisibilityTask operation failed. Task with ID %v not found. Error: %v", request.TaskID, err))
+		if errors.Is(err, sql.ErrNoRows) {
+			// The queue is empty
+			return true, nil
 		}
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetVisibilityTask operation failed. Failed to get record. TaskId: %v. Error: %v", request.TaskID, err))
+		return false, err
 	}
-
-	if len(rows) == 0 {
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("GetVisibilityTask operation failed. Failed to get record. TaskId: %v", request.TaskID))
-	}
-
-	visibilityRow := rows[0]
-	resp := &persistence.InternalGetVisibilityTaskResponse{Task: *p.NewDataBlob(visibilityRow.Data, visibilityRow.DataEncoding)}
-	return resp, nil
+	return len(res) == 0, nil
 }
 
-func (m *sqlExecutionStore) GetVisibilityTasks(
-	request *p.GetVisibilityTasksRequest,
-) (*p.InternalGetVisibilityTasksResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
+func (m *sqlExecutionStore) getVisibilityTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	inclusiveMinTaskID, exclusiveMaxTaskID, err := getImmediateTaskReadRange(request)
+	if err != nil {
+		return nil, err
+	}
+
 	rows, err := m.Db.RangeSelectFromVisibilityTasks(ctx, sqlplugin.VisibilityTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.ReadLevel,
-		MaxTaskID: request.MaxReadLevel,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: inclusiveMinTaskID,
+		ExclusiveMaxTaskID: exclusiveMaxTaskID,
+		PageSize:           request.BatchSize,
 	})
 	if err != nil {
 		if err != sql.ErrNoRows {
 			return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetVisibilityTasks operation failed. Select failed. Error: %v", err))
 		}
 	}
-	resp := &p.InternalGetVisibilityTasksResponse{Tasks: make([]commonpb.DataBlob, len(rows))}
-	for i, row := range rows {
-		resp.Tasks[i] = *p.NewDataBlob(row.Data, row.DataEncoding)
+	resp := &p.InternalGetHistoryTasksResponse{
+		Tasks: make([]p.InternalHistoryTask, len(rows)),
 	}
+	if len(rows) == 0 {
+		return resp, nil
+	}
+
+	for i, row := range rows {
+		resp.Tasks[i] = p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(row.TaskID),
+			Blob: *p.NewDataBlob(row.Data, row.DataEncoding),
+		}
+	}
+	if len(rows) == request.BatchSize {
+		resp.NextPageToken = getImmediateTaskNextPageToken(
+			rows[len(rows)-1].TaskID,
+			exclusiveMaxTaskID,
+		)
+	}
+
 	return resp, nil
 }
 
-func (m *sqlExecutionStore) CompleteVisibilityTask(
-	request *p.CompleteVisibilityTaskRequest,
+func (m *sqlExecutionStore) completeVisibilityTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.DeleteFromVisibilityTasks(ctx, sqlplugin.VisibilityTasksFilter{
 		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
+		TaskID:  request.TaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteVisibilityTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) RangeCompleteVisibilityTask(
-	request *p.RangeCompleteVisibilityTaskRequest,
+func (m *sqlExecutionStore) rangeCompleteVisibilityTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	if _, err := m.Db.RangeDeleteFromVisibilityTasks(ctx, sqlplugin.VisibilityTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.ExclusiveBeginTaskID,
-		MaxTaskID: request.InclusiveEndTaskID,
+		ShardID:            request.ShardID,
+		InclusiveMinTaskID: request.InclusiveMinTaskKey.TaskID,
+		ExclusiveMaxTaskID: request.ExclusiveMaxTaskKey.TaskID,
 	}); err != nil {
 		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteVisibilityTask operation failed. Error: %v", err))
 	}
 	return nil
 }
 
-func (m *sqlExecutionStore) GetTieredStorageTask(
-	request *persistence.GetTieredStorageTaskRequest,
-) (*persistence.InternalGetTieredStorageTaskResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.SelectFromTieredStorageTasks(ctx, sqlplugin.TieredStorageTasksFilter{
-		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
-	})
-	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTieredStorageTask operation failed. Task with ID %v not found. Error: %v", request.TaskID, err))
-		}
-		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTieredStorageTask operation failed. Failed to get record. TaskId: %v. Error: %v", request.TaskID, err))
-	}
-
-	if len(rows) == 0 {
-		return nil, serviceerror.NewNotFound(fmt.Sprintf("GetTieredStorageTask operation failed. Failed to get record. TaskId: %v", request.TaskID))
-	}
-
-	TieredStorageRow := rows[0]
-	resp := &persistence.InternalGetTieredStorageTaskResponse{Task: *p.NewDataBlob(TieredStorageRow.Data, TieredStorageRow.DataEncoding)}
-	return resp, nil
-}
-
-func (m *sqlExecutionStore) GetTieredStorageTasks(
-	request *p.GetTieredStorageTasksRequest,
-) (*p.InternalGetTieredStorageTasksResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	rows, err := m.Db.RangeSelectFromTieredStorageTasks(ctx, sqlplugin.TieredStorageTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.MinTaskID,
-		MaxTaskID: request.MaxTaskID,
-	})
-	if err != nil {
-		if err != sql.ErrNoRows {
-			return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetTieredStorageTasks operation failed. Select failed. Error: %v", err))
-		}
-	}
-	resp := &p.InternalGetTieredStorageTasksResponse{Tasks: make([]commonpb.DataBlob, len(rows))}
-	for i, row := range rows {
-		resp.Tasks[i] = *p.NewDataBlob(row.Data, row.DataEncoding)
-	}
-	return resp, nil
-}
-
-func (m *sqlExecutionStore) CompleteTieredStorageTask(
-	request *p.CompleteTieredStorageTaskRequest,
-) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	if _, err := m.Db.DeleteFromTieredStorageTasks(ctx, sqlplugin.TieredStorageTasksFilter{
-		ShardID: request.ShardID,
-		TaskID:  request.TaskID,
-	}); err != nil {
-		return serviceerror.NewUnavailable(fmt.Sprintf("CompleteTieredStorageTask operation failed. Error: %v", err))
-	}
-	return nil
-}
-
-func (m *sqlExecutionStore) RangeCompleteTieredStorageTask(
-	request *p.RangeCompleteTieredStorageTaskRequest,
-) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
-	if _, err := m.Db.RangeDeleteFromTieredStorageTasks(ctx, sqlplugin.TieredStorageTasksRangeFilter{
-		ShardID:   request.ShardID,
-		MinTaskID: request.ExclusiveBeginTaskID,
-		MaxTaskID: request.InclusiveEndTaskID,
-	}); err != nil {
-		return serviceerror.NewUnavailable(fmt.Sprintf("RangeCompleteTieredStorageTask operation failed. Error: %v", err))
-	}
-	return nil
-}
-
-type timerTaskPageToken struct {
+type scheduledTaskPageToken struct {
 	TaskID    int64
 	Timestamp time.Time
 }
 
-func (t *timerTaskPageToken) serialize() ([]byte, error) {
+func (t *scheduledTaskPageToken) serialize() ([]byte, error) {
 	return json.Marshal(t)
 }
 
-func (t *timerTaskPageToken) deserialize(payload []byte) error {
+func (t *scheduledTaskPageToken) deserialize(payload []byte) error {
 	return json.Unmarshal(payload, t)
 }

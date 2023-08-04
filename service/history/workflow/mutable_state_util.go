@@ -48,31 +48,10 @@ func convertSyncActivityInfos(
 			outputs = append(outputs, &tasks.SyncActivityTask{
 				WorkflowKey:         workflowKey,
 				Version:             activityInfo.Version,
-				ScheduledID:         activityInfo.ScheduleId,
+				ScheduledEventID:    activityInfo.ScheduledEventId,
 				VisibilityTimestamp: now,
 			})
 		}
 	}
 	return outputs
-}
-
-func setTaskInfo(
-	version int64,
-	timestamp time.Time,
-	transferTasks []tasks.Task,
-	timerTasks []tasks.Task,
-	visibilityTasks []tasks.Task,
-) {
-	// set both the task version, as well as the Timestamp on the transfer tasks
-	for _, task := range transferTasks {
-		task.SetVersion(version)
-		task.SetVisibilityTime(timestamp)
-	}
-	for _, task := range timerTasks {
-		task.SetVersion(version)
-	}
-	for _, task := range visibilityTasks {
-		task.SetVersion(version)
-		task.SetVisibilityTime(timestamp)
-	}
 }

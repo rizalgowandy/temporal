@@ -32,6 +32,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"go.temporal.io/api/serviceerror"
 )
 
 type (
@@ -63,11 +64,11 @@ func (s *RetrySuite) TestRetrySuccess() {
 		return &someError{}
 	}
 
-	policy := NewExponentialRetryPolicy(1 * time.Millisecond)
-	policy.SetMaximumInterval(5 * time.Millisecond)
-	policy.SetMaximumAttempts(10)
+	policy := NewExponentialRetryPolicy(1 * time.Millisecond).
+		WithMaximumInterval(5 * time.Millisecond).
+		WithMaximumAttempts(10)
 
-	err := Retry(op, policy, nil)
+	err := ThrottleRetry(op, policy, nil)
 	s.NoError(err)
 	s.Equal(5, i)
 }
@@ -84,11 +85,11 @@ func (s *RetrySuite) TestRetryFailed() {
 		return &someError{}
 	}
 
-	policy := NewExponentialRetryPolicy(1 * time.Millisecond)
-	policy.SetMaximumInterval(5 * time.Millisecond)
-	policy.SetMaximumAttempts(5)
+	policy := NewExponentialRetryPolicy(1 * time.Millisecond).
+		WithMaximumInterval(5 * time.Millisecond).
+		WithMaximumAttempts(5)
 
-	err := Retry(op, policy, nil)
+	err := ThrottleRetry(op, policy, nil)
 	s.Error(err)
 }
 
@@ -112,17 +113,18 @@ func (s *RetrySuite) TestIsRetryableSuccess() {
 		return false
 	}
 
-	policy := NewExponentialRetryPolicy(1 * time.Millisecond)
-	policy.SetMaximumInterval(5 * time.Millisecond)
-	policy.SetMaximumAttempts(10)
+	policy := NewExponentialRetryPolicy(1 * time.Millisecond).
+		WithMaximumInterval(5 * time.Millisecond).
+		WithMaximumAttempts(10)
 
-	err := Retry(op, policy, isRetryable)
+	err := ThrottleRetry(op, policy, isRetryable)
 	s.NoError(err, "Retry count: %v", i)
 	s.Equal(5, i)
 }
 
 func (s *RetrySuite) TestIsRetryableFailure() {
 	i := 0
+	theErr := someError{}
 	op := func() error {
 		i++
 
@@ -130,22 +132,22 @@ func (s *RetrySuite) TestIsRetryableFailure() {
 			return nil
 		}
 
-		return &someError{}
+		return &theErr
 	}
 
-	policy := NewExponentialRetryPolicy(1 * time.Millisecond)
-	policy.SetMaximumInterval(5 * time.Millisecond)
-	policy.SetMaximumAttempts(10)
+	policy := NewExponentialRetryPolicy(1 * time.Millisecond).
+		WithMaximumInterval(5 * time.Millisecond).
+		WithMaximumAttempts(10)
 
-	err := Retry(op, policy, IgnoreErrors([]error{&someError{}}))
+	err := ThrottleRetry(op, policy, IgnoreErrors([]error{&theErr}))
 	s.Error(err)
 	s.Equal(1, i)
 }
 
 func (s *RetrySuite) TestConcurrentRetrier() {
-	policy := NewExponentialRetryPolicy(1 * time.Millisecond)
-	policy.SetMaximumInterval(10 * time.Millisecond)
-	policy.SetMaximumAttempts(4)
+	policy := NewExponentialRetryPolicy(1 * time.Millisecond).
+		WithMaximumInterval(10 * time.Millisecond).
+		WithMaximumAttempts(4)
 
 	// Basic checks
 	retrier := NewConcurrentRetrier(policy)
@@ -190,7 +192,7 @@ func (s *RetrySuite) TestConcurrentRetrier() {
 func (s *RetrySuite) TestRetryContextCancel() {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	err := RetryContext(ctx, func(ctx context.Context) error { return ctx.Err() },
+	err := ThrottleRetryContext(ctx, func(ctx context.Context) error { return ctx.Err() },
 		NewExponentialRetryPolicy(1*time.Millisecond), retryEverything)
 	s.ErrorIs(err, context.Canceled)
 }
@@ -200,12 +202,12 @@ func (s *RetrySuite) TestRetryContextTimeout() {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	start := time.Now()
-	err := RetryContext(ctx, func(ctx context.Context) error { return &someError{} },
+	err := ThrottleRetryContext(ctx, func(ctx context.Context) error { return &someError{} },
 		NewExponentialRetryPolicy(1*time.Second), retryEverything)
-	elapsed := time.Now().Sub(start)
-	s.ErrorIs(err, context.DeadlineExceeded)
-	s.GreaterOrEqual(elapsed, timeout,
-		"Call to retry should take at least as long as the context timeout")
+	elapsed := time.Since(start)
+	s.ErrorIs(err, &someError{})
+	s.Less(elapsed, timeout,
+		"Call to retry should return early if backoff exceeds context timeout")
 }
 
 func (s *RetrySuite) TestContextErrorFromSomeOtherContext() {
@@ -213,7 +215,7 @@ func (s *RetrySuite) TestContextErrorFromSomeOtherContext() {
 	// actually from the context.Context passed to RetryContext
 	script := []error{context.Canceled, context.DeadlineExceeded, nil}
 	invocation := -1
-	err := RetryContext(context.Background(),
+	err := ThrottleRetryContext(context.Background(),
 		func(ctx context.Context) error {
 			invocation++
 			return script[invocation]
@@ -221,6 +223,63 @@ func (s *RetrySuite) TestContextErrorFromSomeOtherContext() {
 		NewExponentialRetryPolicy(1*time.Millisecond),
 		retryEverything)
 	s.NoError(err)
+}
+
+func (s *RetrySuite) TestThrottleRetryContext() {
+	throttleInitialInterval := 100 * time.Millisecond
+	testThrottleRetryPolicy := NewExponentialRetryPolicy(throttleInitialInterval).
+		WithMaximumInterval(throttleRetryMaxInterval).
+		WithExpirationInterval(throttleRetryExpirationInterval)
+	originalThrottleRetryPolicy := throttleRetryPolicy
+	throttleRetryPolicy = testThrottleRetryPolicy
+
+	policy := NewExponentialRetryPolicy(10 * time.Millisecond).
+		WithMaximumAttempts(1)
+
+	// test if throttle retry policy is used on resource exhausted error
+	attempt := 1
+	op := func(_ context.Context) error {
+		if attempt == 1 {
+			attempt++
+			return &serviceerror.ResourceExhausted{}
+		}
+
+		return &someError{}
+	}
+
+	start := SystemClock.Now()
+	err := ThrottleRetryContext(context.Background(), op, policy, retryEverything)
+	s.Equal(&someError{}, err)
+	s.GreaterOrEqual(
+		time.Since(start),
+		throttleInitialInterval/2, // due to jitter
+		"Resource exhausted error should use throttle retry policy",
+	)
+
+	// test if context timeout is respected
+	start = SystemClock.Now()
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	err = ThrottleRetryContext(ctx, func(_ context.Context) error { return &serviceerror.ResourceExhausted{} }, policy, retryEverything)
+	s.Equal(&serviceerror.ResourceExhausted{}, err)
+	s.LessOrEqual(
+		time.Since(start),
+		throttleInitialInterval,
+		"Context timeout should be respected",
+	)
+	cancel()
+
+	// test if retry will stop if there's no more retry indicated by the retry policy
+	attempt = 0
+	op = func(_ context.Context) error {
+		attempt++
+		return &serviceerror.ResourceExhausted{}
+	}
+	err = ThrottleRetryContext(context.Background(), op, policy, retryEverything)
+	s.Equal(&serviceerror.ResourceExhausted{}, err)
+	s.Equal(2, attempt)
+
+	// set the default global throttle retry policy back to its original value
+	throttleRetryPolicy = originalThrottleRetryPolicy
 }
 
 var retryEverything IsRetryable = nil

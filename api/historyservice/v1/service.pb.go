@@ -54,81 +54,97 @@ func init() {
 }
 
 var fileDescriptor_655983da427ae822 = []byte{
-	// 1104 bytes of a gzipped FileDescriptorProto
-	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xac, 0x99, 0xcd, 0x6b, 0x24, 0x45,
-	0x18, 0x87, 0xa7, 0x2e, 0x22, 0x85, 0xae, 0xda, 0x8a, 0x1f, 0x51, 0x1b, 0x51, 0xbc, 0x4e, 0xd8,
-	0x0d, 0xe8, 0x7e, 0x64, 0x5d, 0x77, 0x26, 0xc9, 0x24, 0xbb, 0x89, 0x9a, 0x99, 0x45, 0xc1, 0x8b,
-	0x54, 0x7a, 0xde, 0xcd, 0x34, 0xe9, 0x74, 0xb7, 0x55, 0xd5, 0xa3, 0x73, 0x10, 0x16, 0x3c, 0x09,
-	0x82, 0x22, 0x08, 0x9e, 0x04, 0x4f, 0x8a, 0x20, 0x08, 0x82, 0x20, 0x08, 0x9e, 0x04, 0x4f, 0x92,
-	0xe3, 0x1e, 0xcd, 0xe4, 0xe2, 0x71, 0xff, 0x04, 0x99, 0xe9, 0xa9, 0xca, 0x54, 0x77, 0xf5, 0x58,
-	0x55, 0x3d, 0xb7, 0xdd, 0x49, 0xff, 0x9e, 0x7e, 0xba, 0xaa, 0xba, 0xde, 0x77, 0x6a, 0xf0, 0x1a,
-	0x87, 0xe3, 0x34, 0xa1, 0x24, 0x5a, 0x65, 0x40, 0x87, 0x40, 0x57, 0x49, 0x1a, 0xae, 0x0e, 0x42,
-	0xc6, 0x13, 0x3a, 0x9a, 0x7c, 0x12, 0x06, 0xb0, 0x3a, 0xbc, 0xb8, 0x3a, 0xfb, 0x67, 0x33, 0xa5,
-	0x09, 0x4f, 0xbc, 0x57, 0x45, 0xa8, 0x99, 0x87, 0x9a, 0x24, 0x0d, 0x9b, 0x6a, 0xa8, 0x39, 0xbc,
-	0xb8, 0xb2, 0x6e, 0xc6, 0xa6, 0xf0, 0x61, 0x06, 0x8c, 0x7f, 0x40, 0x81, 0xa5, 0x49, 0xcc, 0x66,
-	0x37, 0xb9, 0x74, 0x6f, 0x0d, 0x5f, 0xd8, 0xce, 0x2f, 0xee, 0xe5, 0x17, 0x7b, 0xdf, 0x23, 0xfc,
-	0x74, 0x8f, 0x13, 0xca, 0xdf, 0x4b, 0xe8, 0xd1, 0xdd, 0x28, 0xf9, 0x68, 0xf3, 0x63, 0x08, 0x32,
-	0x1e, 0x26, 0xb1, 0xb7, 0xd1, 0x34, 0x72, 0x6a, 0xea, 0xe3, 0xdd, 0x5c, 0x61, 0x65, 0xb3, 0x26,
-	0x25, 0x7f, 0x80, 0x97, 0x1b, 0xde, 0x57, 0x08, 0x3f, 0xd6, 0x01, 0xbe, 0x97, 0x71, 0x72, 0x10,
-	0x41, 0x8f, 0x13, 0x0e, 0xde, 0x75, 0x43, 0x78, 0x21, 0x27, 0xdc, 0xde, 0x70, 0x8d, 0x4b, 0xa9,
-	0xaf, 0x11, 0x7e, 0xfc, 0x9d, 0x24, 0x8a, 0x14, 0x2b, 0x53, 0x6c, 0x31, 0x28, 0xb4, 0x6e, 0x38,
-	0xe7, 0xa5, 0xd7, 0x77, 0x08, 0x3f, 0xd5, 0x05, 0x06, 0xbc, 0xc7, 0xc3, 0xe0, 0x68, 0x74, 0x87,
-	0xb0, 0xa3, 0xfd, 0x0c, 0x32, 0xf0, 0x5a, 0x86, 0x6c, 0x5d, 0x58, 0xf8, 0xb5, 0x6b, 0x31, 0xa4,
-	0xe3, 0xcf, 0x08, 0x3f, 0xd7, 0x85, 0x20, 0xa1, 0x7d, 0x31, 0xed, 0x93, 0xab, 0xa6, 0xeb, 0x00,
-	0xfa, 0x5e, 0xc7, 0xf8, 0x26, 0x15, 0x04, 0x61, 0xbb, 0x5d, 0x1f, 0xa4, 0x51, 0xbe, 0x19, 0xf0,
-	0x70, 0x18, 0xf2, 0x91, 0xbb, 0xb2, 0x86, 0xe0, 0xa6, 0xac, 0x05, 0x49, 0xe5, 0xdf, 0x10, 0x7e,
-	0x21, 0xff, 0xaf, 0xf2, 0x6c, 0xed, 0xe4, 0x38, 0x8d, 0x60, 0x62, 0x7d, 0xcb, 0x7c, 0x36, 0x2b,
-	0x21, 0x42, 0xfc, 0xf6, 0x52, 0x58, 0x85, 0xe1, 0x2e, 0x5d, 0xba, 0x45, 0xc2, 0xc8, 0x6a, 0xb8,
-	0x2b, 0x08, 0xf6, 0xc3, 0x5d, 0x09, 0x92, 0xca, 0xbf, 0x22, 0xfc, 0x7c, 0x79, 0x5a, 0xb6, 0x81,
-	0x50, 0x7e, 0x00, 0x84, 0x7b, 0x3b, 0xce, 0x53, 0x2b, 0x19, 0x42, 0xfb, 0xd6, 0x32, 0x50, 0xba,
-	0x75, 0x32, 0x7f, 0xa9, 0xf3, 0x3a, 0xd1, 0x42, 0x1c, 0xd7, 0x49, 0x05, 0x4b, 0xb7, 0x4e, 0xe6,
-	0x2f, 0x75, 0x5b, 0x27, 0x65, 0x82, 0xe3, 0x3a, 0xd1, 0x81, 0x0a, 0xeb, 0xa4, 0xfc, 0x74, 0x24,
-	0x0e, 0x60, 0x22, 0xbd, 0x53, 0x63, 0x84, 0x66, 0x0c, 0xfb, 0x75, 0xb2, 0x00, 0x25, 0xc5, 0x7f,
-	0x44, 0xf8, 0x99, 0x5e, 0x78, 0x18, 0x93, 0xa8, 0xdc, 0x31, 0x18, 0xd7, 0x7a, 0x7d, 0x5e, 0x08,
-	0x6f, 0xd5, 0xc5, 0x48, 0xd9, 0x3f, 0x11, 0x7e, 0x69, 0x76, 0x55, 0xc8, 0x07, 0x15, 0x7d, 0xce,
-	0x5b, 0x76, 0xb7, 0xab, 0x04, 0x09, 0xfd, 0xb7, 0x97, 0xc6, 0x93, 0xcf, 0xf1, 0x13, 0xc2, 0xcf,
-	0x76, 0xe1, 0x38, 0x19, 0x42, 0x1e, 0x52, 0xda, 0x8d, 0x2d, 0xe3, 0xf9, 0xd5, 0x03, 0x84, 0x77,
-	0xa7, 0x36, 0x47, 0xfa, 0xfe, 0x82, 0xf0, 0xca, 0x1d, 0xa0, 0xc7, 0x61, 0x4c, 0x38, 0x94, 0x47,
-	0xdc, 0xf4, 0x45, 0xaa, 0x46, 0x08, 0xe7, 0x9d, 0x25, 0x90, 0xa4, 0xf5, 0xa4, 0x17, 0x9e, 0xf6,
-	0x2c, 0xee, 0xbd, 0xb0, 0x3e, 0x6e, 0xdb, 0x0b, 0x57, 0x51, 0xa4, 0xe9, 0x1f, 0x08, 0xfb, 0x33,
-	0x68, 0xfe, 0x8a, 0x96, 0x8d, 0x77, 0x8d, 0xef, 0xb5, 0x08, 0x23, 0xcc, 0xf7, 0x96, 0x44, 0x53,
-	0x1a, 0xd4, 0x5e, 0x30, 0x80, 0x7e, 0x16, 0xc1, 0x7c, 0x41, 0x35, 0x6e, 0x50, 0x75, 0x61, 0xdb,
-	0x06, 0x55, 0xcf, 0x90, 0x8e, 0xbf, 0x23, 0xfc, 0x62, 0x5e, 0x3c, 0xdb, 0x83, 0x30, 0xea, 0xcb,
-	0xc7, 0x38, 0xaf, 0x89, 0xb7, 0xad, 0x4a, 0x70, 0x05, 0x45, 0x58, 0xef, 0x2e, 0x07, 0xa6, 0x54,
-	0xc5, 0x0d, 0x60, 0x01, 0x0d, 0x0f, 0x34, 0xef, 0xa0, 0xe9, 0xdb, 0x5e, 0x49, 0xb0, 0xad, 0x8a,
-	0x0b, 0x40, 0x52, 0xf9, 0x1b, 0x84, 0x9f, 0xe8, 0x42, 0x1a, 0x85, 0x01, 0xe1, 0xb0, 0x39, 0x84,
-	0x98, 0xb3, 0x77, 0x2f, 0x79, 0x37, 0x8c, 0x07, 0xa6, 0x90, 0x14, 0x8a, 0x6f, 0xba, 0x03, 0x94,
-	0xaf, 0x9f, 0xbd, 0x51, 0x1c, 0xf4, 0x06, 0x84, 0xf6, 0x27, 0xfb, 0x5d, 0xc6, 0x8c, 0xbf, 0x7e,
-	0x16, 0x72, 0xb6, 0x5f, 0x3f, 0x4b, 0x71, 0x29, 0xf5, 0x19, 0xc2, 0x8f, 0x4c, 0xfe, 0x2a, 0x6a,
-	0xb6, 0x77, 0xd5, 0x02, 0x29, 0x42, 0x42, 0xe7, 0x9a, 0x53, 0x56, 0x79, 0xa3, 0xc5, 0x1c, 0x2b,
-	0xf5, 0xa9, 0x65, 0xb9, 0x40, 0x74, 0xb5, 0xa9, 0x5d, 0x8b, 0x21, 0x1d, 0xbf, 0x45, 0xf8, 0x49,
-	0x71, 0xc9, 0xec, 0x20, 0x64, 0x3b, 0x61, 0xdc, 0xbb, 0x69, 0x89, 0x9f, 0xcb, 0x0a, 0xc3, 0x56,
-	0x1d, 0x84, 0x14, 0xfc, 0x14, 0x61, 0xdc, 0x8e, 0x12, 0x06, 0xd3, 0xf9, 0xf6, 0x2e, 0x1b, 0x42,
-	0xcf, 0x23, 0x42, 0xe7, 0x8a, 0x43, 0x52, 0x5a, 0x7c, 0x82, 0x1f, 0xee, 0x00, 0xcf, 0x15, 0x5e,
-	0x33, 0x3f, 0x23, 0x51, 0x04, 0x5e, 0xb7, 0xce, 0x29, 0x83, 0x90, 0x37, 0x19, 0xd3, 0x8a, 0x70,
-	0xd9, 0xaa, 0x2f, 0x99, 0xaf, 0x03, 0x57, 0x1c, 0x92, 0x4a, 0x37, 0xd0, 0x01, 0x2e, 0xf6, 0x84,
-	0x30, 0x89, 0xf7, 0x80, 0x31, 0x72, 0x08, 0xcc, 0xb8, 0x1b, 0xd0, 0xc7, 0x6d, 0xbb, 0x81, 0x2a,
-	0x8a, 0xb2, 0xd1, 0x77, 0x80, 0x6f, 0xec, 0xee, 0xeb, 0x64, 0x3b, 0xe6, 0xb7, 0xd1, 0x13, 0x6c,
-	0x37, 0xfa, 0x05, 0x20, 0xa9, 0xfc, 0x39, 0xc2, 0x8f, 0xee, 0x67, 0x40, 0x47, 0xa2, 0x1a, 0x78,
-	0xa6, 0xbb, 0x8f, 0x92, 0x12, 0x6a, 0xeb, 0x6e, 0x61, 0x45, 0xa7, 0x0b, 0x24, 0x4d, 0xa3, 0x51,
-	0xbe, 0xf5, 0x1b, 0xeb, 0x28, 0x29, 0x5b, 0x9d, 0x42, 0x58, 0xea, 0x7c, 0x81, 0xf0, 0x85, 0x7c,
-	0x14, 0xe5, 0x2c, 0xae, 0x5b, 0x0d, 0x7e, 0x71, 0xea, 0xae, 0x3b, 0xa6, 0xd5, 0x73, 0xce, 0x8c,
-	0x1e, 0xc2, 0xbc, 0x93, 0xf1, 0x39, 0x67, 0x21, 0x68, 0x7d, 0xce, 0x59, 0xca, 0x2b, 0x5e, 0x7b,
-	0xe0, 0xe8, 0x55, 0x0c, 0xda, 0x7a, 0x95, 0xf3, 0x85, 0xf3, 0xd7, 0xbb, 0x14, 0xd8, 0x60, 0xbe,
-	0xb9, 0x64, 0x16, 0xe7, 0xaf, 0xe5, 0xb0, 0xfd, 0xf9, 0xab, 0x8e, 0x21, 0x1d, 0xff, 0x46, 0xf8,
-	0x95, 0x0e, 0xc4, 0x40, 0x09, 0x87, 0x5d, 0xc2, 0xf8, 0xac, 0x22, 0xcd, 0xbd, 0xb8, 0xb9, 0xf2,
-	0xbe, 0xf1, 0xe2, 0xf9, 0x5f, 0x96, 0x78, 0x82, 0xee, 0x32, 0x91, 0xca, 0xa0, 0xab, 0x9b, 0xe5,
-	0xac, 0x4f, 0x6b, 0x39, 0xed, 0xb4, 0x6a, 0xb3, 0xd6, 0xae, 0xc5, 0x10, 0x8e, 0xad, 0xf4, 0xe4,
-	0xd4, 0x6f, 0xdc, 0x3f, 0xf5, 0x1b, 0x0f, 0x4e, 0x7d, 0x74, 0x6f, 0xec, 0xa3, 0x1f, 0xc6, 0x3e,
-	0xfa, 0x6b, 0xec, 0xa3, 0x93, 0xb1, 0x8f, 0xfe, 0x19, 0xfb, 0xe8, 0xdf, 0xb1, 0xdf, 0x78, 0x30,
-	0xf6, 0xd1, 0x97, 0x67, 0x7e, 0xe3, 0xe4, 0xcc, 0x6f, 0xdc, 0x3f, 0xf3, 0x1b, 0xef, 0x5f, 0x3d,
-	0x4c, 0xce, 0x6f, 0x1f, 0x26, 0x0b, 0x7f, 0xfc, 0xb9, 0xa6, 0x7e, 0x72, 0xf0, 0xd0, 0xf4, 0xb7,
-	0x9f, 0xb5, 0xff, 0x02, 0x00, 0x00, 0xff, 0xff, 0xbb, 0x79, 0x47, 0xd1, 0x97, 0x1a, 0x00, 0x00,
+	// 1346 bytes of a gzipped FileDescriptorProto
+	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xac, 0x9a, 0xcd, 0x8b, 0x23, 0xc5,
+	0x1b, 0xc7, 0x53, 0x97, 0x1f, 0x3f, 0x0a, 0x5d, 0xb5, 0x15, 0x5f, 0x46, 0x6d, 0x7c, 0x41, 0xf1,
+	0x94, 0x71, 0x77, 0x41, 0xf7, 0x65, 0xd6, 0x75, 0x92, 0x99, 0xc9, 0xcc, 0xee, 0x8c, 0xce, 0x24,
+	0xb3, 0x23, 0x78, 0x91, 0x4a, 0xf2, 0xcc, 0xa4, 0x98, 0x4e, 0xba, 0xad, 0xaa, 0x44, 0x73, 0x10,
+	0x04, 0x4f, 0x82, 0xa0, 0x08, 0x82, 0x27, 0xc1, 0x93, 0x22, 0x08, 0x82, 0x20, 0x08, 0x82, 0x27,
+	0xc1, 0x83, 0xc8, 0x80, 0x07, 0xf7, 0xe8, 0x64, 0x2e, 0x1e, 0xf7, 0x4f, 0x90, 0xa4, 0x53, 0x35,
+	0xa9, 0xee, 0xea, 0xa4, 0xaa, 0x93, 0xdb, 0x4c, 0x52, 0xdf, 0x4f, 0x7f, 0xab, 0xea, 0xe9, 0xa7,
+	0x9f, 0x7a, 0x3a, 0xf8, 0xb2, 0x80, 0x76, 0x14, 0x32, 0x12, 0x2c, 0x73, 0x60, 0x3d, 0x60, 0xcb,
+	0x24, 0xa2, 0xcb, 0x2d, 0xca, 0x45, 0xc8, 0xfa, 0xc3, 0x4f, 0x68, 0x03, 0x96, 0x7b, 0x17, 0x97,
+	0xc7, 0x7f, 0x16, 0x23, 0x16, 0x8a, 0xd0, 0x7b, 0x41, 0x8a, 0x8a, 0xb1, 0xa8, 0x48, 0x22, 0x5a,
+	0xd4, 0x45, 0xc5, 0xde, 0xc5, 0xa5, 0x15, 0x3b, 0x36, 0x83, 0x77, 0xbb, 0xc0, 0xc5, 0x3b, 0x0c,
+	0x78, 0x14, 0x76, 0xf8, 0xf8, 0x22, 0x97, 0xfe, 0x2a, 0xe1, 0x0b, 0x9b, 0xf1, 0xe0, 0x5a, 0x3c,
+	0xd8, 0xfb, 0x06, 0xe1, 0x47, 0x6b, 0x82, 0x30, 0xf1, 0x56, 0xc8, 0x8e, 0x0f, 0x83, 0xf0, 0xbd,
+	0xf5, 0xf7, 0xa1, 0xd1, 0x15, 0x34, 0xec, 0x78, 0x6b, 0x45, 0x2b, 0x4f, 0x45, 0xb3, 0xbc, 0x1a,
+	0x5b, 0x58, 0x5a, 0x9f, 0x93, 0x12, 0x4f, 0xe0, 0xb9, 0x82, 0xf7, 0x39, 0xc2, 0x0f, 0x54, 0x40,
+	0xec, 0x74, 0x05, 0xa9, 0x07, 0x50, 0x13, 0x44, 0x80, 0x77, 0xc3, 0x12, 0x9e, 0xd0, 0x49, 0x6f,
+	0xaf, 0xe5, 0x95, 0x2b, 0x53, 0x5f, 0x20, 0xfc, 0xe0, 0x6e, 0x18, 0x04, 0x9a, 0x2b, 0x5b, 0x6c,
+	0x52, 0x28, 0x6d, 0xdd, 0xcc, 0xad, 0x57, 0xbe, 0xbe, 0x46, 0xf8, 0x91, 0x2a, 0x70, 0x10, 0x35,
+	0x41, 0x1b, 0xc7, 0xfd, 0x7d, 0xc2, 0x8f, 0xf7, 0xba, 0xd0, 0x05, 0xaf, 0x64, 0xc9, 0x36, 0x89,
+	0xa5, 0xbf, 0xf2, 0x5c, 0x0c, 0xe5, 0xf1, 0x07, 0x84, 0x9f, 0xa8, 0x42, 0x23, 0x64, 0x4d, 0xb9,
+	0xed, 0xc3, 0x51, 0xa3, 0x38, 0x80, 0xa6, 0x57, 0xb1, 0xbe, 0x48, 0x06, 0x41, 0xba, 0xdd, 0x9c,
+	0x1f, 0x64, 0xb0, 0xbc, 0xda, 0x10, 0xb4, 0x47, 0x45, 0x3f, 0xbf, 0x65, 0x03, 0x21, 0x9f, 0x65,
+	0x23, 0x48, 0x59, 0xfe, 0x19, 0xe1, 0xa7, 0xe2, 0x7f, 0xb5, 0xb9, 0x95, 0xc3, 0x76, 0x14, 0xc0,
+	0xd0, 0xf5, 0x2d, 0xfb, 0xdd, 0xcc, 0x84, 0x48, 0xe3, 0xb7, 0x17, 0xc2, 0x4a, 0x2c, 0x77, 0x6a,
+	0xe8, 0x06, 0xa1, 0x81, 0xd3, 0x72, 0x67, 0x10, 0xdc, 0x97, 0x3b, 0x13, 0xa4, 0x2c, 0x7f, 0x85,
+	0xf0, 0xc3, 0x5b, 0x7c, 0x72, 0xc8, 0x01, 0x09, 0x68, 0xd3, 0x5b, 0xb5, 0xbc, 0x86, 0x41, 0x2b,
+	0x6d, 0x96, 0xe6, 0x41, 0x28, 0x83, 0x3f, 0x21, 0xfc, 0x64, 0x3a, 0x6e, 0x36, 0x81, 0x30, 0x51,
+	0x07, 0x22, 0xbc, 0xad, 0xdc, 0xb1, 0xa7, 0x18, 0xd2, 0xf0, 0xad, 0x45, 0xa0, 0x4c, 0x81, 0x3c,
+	0x39, 0x34, 0x77, 0x20, 0x1b, 0x21, 0x39, 0x03, 0x39, 0x83, 0x65, 0x0a, 0xe4, 0xc9, 0xa1, 0xf9,
+	0x02, 0x39, 0x4d, 0xc8, 0x19, 0xc8, 0x26, 0x50, 0x22, 0x4e, 0xd2, 0xb3, 0x23, 0x9d, 0x06, 0x0c,
+	0x4d, 0x6f, 0xcd, 0xb1, 0x42, 0x63, 0x86, 0x7b, 0x9c, 0x4c, 0x41, 0x25, 0xee, 0xc0, 0xc9, 0x41,
+	0xae, 0x77, 0x60, 0x4a, 0xeb, 0x7e, 0x07, 0x1a, 0x10, 0xca, 0xe0, 0x77, 0x08, 0x3f, 0x56, 0xa3,
+	0x47, 0x1d, 0x12, 0xa4, 0x6b, 0x2e, 0xeb, 0x6a, 0xc9, 0xac, 0x97, 0x46, 0x37, 0xe6, 0xc5, 0x28,
+	0xb3, 0xbf, 0x21, 0xfc, 0xcc, 0x78, 0x14, 0x15, 0xad, 0x8c, 0x4a, 0xf1, 0x0d, 0xb7, 0xcb, 0x65,
+	0x82, 0xa4, 0xfd, 0x37, 0x17, 0xc6, 0x53, 0xf3, 0xf8, 0x1e, 0xe1, 0xc7, 0xab, 0xd0, 0x0e, 0x7b,
+	0x10, 0x8b, 0xb4, 0x82, 0x6d, 0xc3, 0x3a, 0x00, 0xcd, 0x00, 0xe9, 0xbb, 0x32, 0x37, 0x47, 0xf9,
+	0xfd, 0x11, 0xe1, 0xa5, 0x7d, 0x60, 0x6d, 0xda, 0x21, 0x02, 0xd2, 0x2b, 0x6e, 0x7b, 0xa7, 0x67,
+	0x23, 0xa4, 0xe7, 0xad, 0x05, 0x90, 0xb4, 0xd0, 0x5e, 0x83, 0x61, 0xf6, 0xcb, 0x1f, 0xda, 0x19,
+	0x7a, 0xd7, 0xd0, 0xce, 0xc4, 0x28, 0xb3, 0xc3, 0xa3, 0xcf, 0xa8, 0x44, 0xcd, 0x7f, 0xf4, 0x31,
+	0xcb, 0x5d, 0x8f, 0x3e, 0x59, 0x14, 0xe5, 0xf4, 0x57, 0x84, 0xfd, 0x31, 0x34, 0x4e, 0x78, 0x69,
+	0xc7, 0xdb, 0xd6, 0xd7, 0x9a, 0x86, 0x91, 0xce, 0x77, 0x16, 0x44, 0xd3, 0xce, 0x23, 0xb5, 0x46,
+	0x0b, 0x9a, 0xdd, 0x00, 0x26, 0xab, 0x13, 0xeb, 0xf3, 0x88, 0x49, 0xec, 0x7a, 0x1e, 0x31, 0x33,
+	0xb4, 0x54, 0x77, 0x00, 0x8c, 0x1e, 0xf6, 0x37, 0x28, 0xe3, 0x42, 0x3b, 0x09, 0x8c, 0x95, 0x4d,
+	0xeb, 0x54, 0x37, 0x0b, 0xe4, 0x9a, 0xea, 0x66, 0xf3, 0xd4, 0x3c, 0x7e, 0x41, 0xf8, 0xe9, 0xb8,
+	0xa4, 0x2a, 0xb7, 0x68, 0xd0, 0x54, 0xdb, 0x71, 0x5e, 0x29, 0xdd, 0x76, 0x2a, 0xcc, 0x32, 0x28,
+	0x72, 0x06, 0xdb, 0x8b, 0x81, 0x29, 0xfb, 0x7f, 0x23, 0xfc, 0x62, 0x3c, 0x5b, 0xe3, 0xd8, 0x51,
+	0x5c, 0x0d, 0x49, 0xd0, 0xf4, 0xf6, 0x9d, 0x16, 0x6f, 0x16, 0x4e, 0x4e, 0xe8, 0xce, 0x82, 0xa9,
+	0x5a, 0x15, 0xb8, 0x06, 0xbc, 0xc1, 0x68, 0xdd, 0x90, 0x1f, 0x2b, 0xd6, 0x89, 0x2d, 0x83, 0xe0,
+	0x5a, 0x05, 0x4e, 0x01, 0x29, 0xcb, 0x5f, 0x22, 0xfc, 0x50, 0x15, 0xa2, 0x80, 0x36, 0x88, 0x80,
+	0xf5, 0x1e, 0x74, 0x04, 0x3f, 0xb8, 0xe4, 0xdd, 0xb4, 0xde, 0xf2, 0x84, 0x52, 0x5a, 0x7c, 0x3d,
+	0x3f, 0x20, 0x91, 0xbe, 0xc7, 0xdf, 0xcb, 0x39, 0xc4, 0xcf, 0xf3, 0x35, 0x57, 0xbc, 0x26, 0x77,
+	0x4f, 0xdf, 0x66, 0x8a, 0xd6, 0xb9, 0xaa, 0xf5, 0x3b, 0x8d, 0x5a, 0x8b, 0xb0, 0xe6, 0xf0, 0xcb,
+	0x2e, 0xb7, 0xee, 0x5c, 0x25, 0x74, 0xae, 0x9d, 0xab, 0x94, 0x5c, 0x99, 0xfa, 0x18, 0xe1, 0xfb,
+	0x86, 0xdf, 0xca, 0x4a, 0xd5, 0xbb, 0xe6, 0x80, 0x94, 0x22, 0x69, 0xe7, 0x7a, 0x2e, 0xad, 0xf6,
+	0x74, 0x90, 0xd1, 0xa8, 0x15, 0x66, 0x25, 0xc7, 0x50, 0x36, 0x15, 0x65, 0xe5, 0xb9, 0x18, 0xda,
+	0xb1, 0x42, 0x0e, 0x19, 0xf7, 0x50, 0x37, 0x43, 0x2e, 0xac, 0x8f, 0x15, 0x06, 0xad, 0xeb, 0xb1,
+	0xc2, 0x88, 0x50, 0x06, 0x3f, 0x42, 0x18, 0x97, 0x83, 0x90, 0xc3, 0x68, 0xbf, 0xbd, 0x2b, 0x96,
+	0xd0, 0x73, 0x89, 0xb4, 0x73, 0x35, 0x87, 0x52, 0xb9, 0xf8, 0x00, 0xff, 0xbf, 0x02, 0x22, 0xb6,
+	0xf0, 0x8a, 0x7d, 0x7b, 0x55, 0x33, 0xf0, 0xaa, 0xb3, 0x4e, 0x5b, 0x84, 0xb8, 0xba, 0x1e, 0x55,
+	0x17, 0x57, 0x9c, 0x0a, 0xf2, 0xc9, 0x9a, 0xe2, 0x6a, 0x0e, 0xa5, 0x96, 0x9a, 0x2a, 0x20, 0x64,
+	0x62, 0xa0, 0x61, 0x67, 0x07, 0x38, 0x27, 0x47, 0xc0, 0xad, 0x53, 0x93, 0x59, 0xee, 0x9a, 0x9a,
+	0xb2, 0x28, 0xda, 0x23, 0xa9, 0x02, 0x62, 0x6d, 0x7b, 0xcf, 0x64, 0xb6, 0x62, 0x7f, 0x19, 0x33,
+	0xc1, 0xf5, 0x91, 0x34, 0x05, 0xa4, 0x2c, 0x7f, 0x82, 0xf0, 0xfd, 0x7b, 0x5d, 0x60, 0x7d, 0x99,
+	0x6e, 0x3d, 0xdb, 0xec, 0xa3, 0xa9, 0xa4, 0xb5, 0x95, 0x7c, 0x62, 0xcd, 0x4e, 0x15, 0x48, 0x14,
+	0x05, 0xfd, 0xf8, 0x21, 0x65, 0x6d, 0x47, 0x53, 0xb9, 0xda, 0x49, 0x88, 0x95, 0x9d, 0x4f, 0x11,
+	0xbe, 0x10, 0xaf, 0xa2, 0xda, 0xc5, 0x15, 0xa7, 0xc5, 0x4f, 0x6e, 0xdd, 0x8d, 0x9c, 0x6a, 0xfd,
+	0x15, 0x49, 0x97, 0x1d, 0xc1, 0xa4, 0x27, 0xeb, 0x57, 0x24, 0x09, 0xa1, 0xf3, 0x2b, 0x92, 0x94,
+	0x5e, 0xf3, 0xb5, 0x03, 0x39, 0x7d, 0x25, 0x85, 0xae, 0xbe, 0xd2, 0xfa, 0xc4, 0xab, 0x9b, 0x43,
+	0x06, 0xbc, 0x35, 0x59, 0xe9, 0x73, 0x87, 0x57, 0x37, 0x69, 0xb1, 0xfb, 0xab, 0x1b, 0x13, 0x43,
+	0x79, 0xfc, 0x13, 0xe1, 0xe7, 0x2b, 0xd0, 0x01, 0x46, 0x04, 0x6c, 0x13, 0x2e, 0xc6, 0x4f, 0xa4,
+	0x89, 0x1b, 0x37, 0xb6, 0xbc, 0x67, 0x1d, 0x3c, 0x33, 0x59, 0x72, 0x06, 0xd5, 0x45, 0x22, 0xb5,
+	0x45, 0xd7, 0x93, 0xe5, 0xb8, 0x4e, 0x2b, 0xe5, 0xca, 0xb4, 0x7a, 0xb1, 0x56, 0x9e, 0x8b, 0xa1,
+	0x55, 0x20, 0x55, 0xa8, 0x77, 0x69, 0xd0, 0xd4, 0x8a, 0xa4, 0x55, 0xeb, 0x3d, 0x4d, 0x69, 0x5d,
+	0x2b, 0x10, 0x23, 0x42, 0x6b, 0x53, 0xe8, 0x6d, 0x97, 0x03, 0xca, 0x69, 0x9d, 0x06, 0xa3, 0x6a,
+	0x6f, 0x78, 0x1c, 0xb2, 0x6e, 0x53, 0x4c, 0xc7, 0xb8, 0xb6, 0x29, 0x66, 0xd1, 0xb4, 0xfe, 0xd5,
+	0x9d, 0xa8, 0x49, 0xe6, 0xe9, 0x5f, 0x65, 0xe8, 0x5d, 0xfb, 0x57, 0x99, 0x18, 0xad, 0x43, 0xbf,
+	0x1b, 0x06, 0xe9, 0xbe, 0x4b, 0x2c, 0xb5, 0xee, 0xd0, 0x4f, 0x61, 0xb8, 0x76, 0xe8, 0xa7, 0xa2,
+	0x94, 0xf1, 0x3f, 0x10, 0x7e, 0xb6, 0x26, 0x18, 0x90, 0xf6, 0xf9, 0xf3, 0x34, 0x5d, 0x7c, 0x58,
+	0x37, 0x81, 0x67, 0x91, 0xe4, 0x24, 0x76, 0x17, 0x07, 0x94, 0x53, 0x79, 0x09, 0xbd, 0x8c, 0x4a,
+	0xd1, 0xc9, 0xa9, 0x5f, 0xb8, 0x7b, 0xea, 0x17, 0xee, 0x9d, 0xfa, 0xe8, 0xc3, 0x81, 0x8f, 0xbe,
+	0x1d, 0xf8, 0xe8, 0xf7, 0x81, 0x8f, 0x4e, 0x06, 0x3e, 0xfa, 0x67, 0xe0, 0xa3, 0x7f, 0x07, 0x7e,
+	0xe1, 0xde, 0xc0, 0x47, 0x9f, 0x9d, 0xf9, 0x85, 0x93, 0x33, 0xbf, 0x70, 0xf7, 0xcc, 0x2f, 0xbc,
+	0x7d, 0xed, 0x28, 0x3c, 0xf7, 0x43, 0xc3, 0xa9, 0xbf, 0xe7, 0xb8, 0xae, 0x7f, 0x52, 0xff, 0xdf,
+	0xe8, 0xe7, 0x1c, 0x97, 0xff, 0x0b, 0x00, 0x00, 0xff, 0xff, 0x6c, 0x5d, 0xf6, 0xc7, 0x6a, 0x22,
+	0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
 var _ context.Context
-var _ grpc.ClientConn
+var _ grpc.ClientConnInterface
 
 // This is a compile-time assertion to ensure that this generated file
 // is compatible with the grpc package it is being compiled against.
@@ -174,6 +190,8 @@ type HistoryServiceClient interface {
 	// WorkflowTaskFailedEvent written to the history and a new WorkflowTask created.  This API can be used by client to
 	// either clear sticky task queue or report ny panics during WorkflowTask processing.
 	RespondWorkflowTaskFailed(ctx context.Context, in *RespondWorkflowTaskFailedRequest, opts ...grpc.CallOption) (*RespondWorkflowTaskFailedResponse, error)
+	// IsWorkflowTaskValid is called by matching service checking whether the workflow task is valid.
+	IsWorkflowTaskValid(ctx context.Context, in *IsWorkflowTaskValidRequest, opts ...grpc.CallOption) (*IsWorkflowTaskValidResponse, error)
 	// RecordActivityTaskHeartbeat is called by application worker while it is processing an ActivityTask.  If worker fails
 	// to heartbeat within 'heartbeatTimeoutSeconds' interval for the ActivityTask, then it will be marked as timedout and
 	// 'ActivityTaskTimedOut' event will be written to the workflow history.  Calling 'RecordActivityTaskHeartbeat' will
@@ -198,6 +216,8 @@ type HistoryServiceClient interface {
 	// PollActivityTaskQueue API call for completion. It fails with 'EntityNotExistsError' if the taskToken is not valid
 	// anymore due to activity timeout.
 	RespondActivityTaskCanceled(ctx context.Context, in *RespondActivityTaskCanceledRequest, opts ...grpc.CallOption) (*RespondActivityTaskCanceledResponse, error)
+	// IsActivityTaskValid is called by matching service checking whether the workflow task is valid.
+	IsActivityTaskValid(ctx context.Context, in *IsActivityTaskValidRequest, opts ...grpc.CallOption) (*IsActivityTaskValidResponse, error)
 	// SignalWorkflowExecution is used to send a signal event to running workflow execution.  This results in
 	// WorkflowExecutionSignaled event recorded in the history and a workflow task being created for the execution.
 	SignalWorkflowExecution(ctx context.Context, in *SignalWorkflowExecutionRequest, opts ...grpc.CallOption) (*SignalWorkflowExecutionResponse, error)
@@ -216,6 +236,10 @@ type HistoryServiceClient interface {
 	// TerminateWorkflowExecution terminates an existing workflow execution by recording WorkflowExecutionTerminated event
 	// in the history and immediately terminating the execution instance.
 	TerminateWorkflowExecution(ctx context.Context, in *TerminateWorkflowExecutionRequest, opts ...grpc.CallOption) (*TerminateWorkflowExecutionResponse, error)
+	// DeleteWorkflowExecution asynchronously deletes a specific Workflow Execution (when WorkflowExecution.run_id is
+	// provided) or the latest Workflow Execution (when WorkflowExecution.run_id is not provided). If the Workflow
+	// Execution is Running, it will be terminated before deletion.
+	DeleteWorkflowExecution(ctx context.Context, in *DeleteWorkflowExecutionRequest, opts ...grpc.CallOption) (*DeleteWorkflowExecutionResponse, error)
 	// ResetWorkflowExecution reset an existing workflow execution by a firstEventId of a existing event batch
 	// in the history and immediately terminating the current execution instance.
 	// After reset, the history will grow from nextFirstEventId.
@@ -230,12 +254,29 @@ type HistoryServiceClient interface {
 	// child execution without creating the workflow task and then calls this API after updating the mutable state of
 	// parent execution.
 	ScheduleWorkflowTask(ctx context.Context, in *ScheduleWorkflowTaskRequest, opts ...grpc.CallOption) (*ScheduleWorkflowTaskResponse, error)
+	// VerifyFirstWorkflowTaskScheduled checks if workflow has its first workflow task scheduled.
+	// This is only used by standby transfer start child workflow task logic to make sure parent workflow has
+	// scheduled first workflow task in child after recording child started in its mutable state; otherwise,
+	// during namespace failover, it's possible that none of the clusters will schedule the first workflow task.
+	// NOTE: This is an experimental API. If later we found there are more verification API and there's a clear pattern
+	// of how verification is done, we may unify them into one generic verfication API.
+	VerifyFirstWorkflowTaskScheduled(ctx context.Context, in *VerifyFirstWorkflowTaskScheduledRequest, opts ...grpc.CallOption) (*VerifyFirstWorkflowTaskScheduledResponse, error)
 	// RecordChildExecutionCompleted is used for reporting the completion of child workflow execution to parent.
 	// This is mainly called by transfer queue processor during the processing of DeleteExecution task.
 	RecordChildExecutionCompleted(ctx context.Context, in *RecordChildExecutionCompletedRequest, opts ...grpc.CallOption) (*RecordChildExecutionCompletedResponse, error)
+	// VerifyChildExecutionCompletionRecorded checks if child completion result is recorded in parent workflow.
+	// This is only used by standby transfer close execution logic to make sure parent workflow has the result
+	// recorded before completing the task, otherwise during namespace failover, it's possible that none of the
+	// clusters will record the child result in parent workflow.
+	// NOTE: This is an experimental API. If later we found there are more verification API and there's a clear pattern
+	// of how verification is done, we may unify them into one generic verfication API.
+	VerifyChildExecutionCompletionRecorded(ctx context.Context, in *VerifyChildExecutionCompletionRecordedRequest, opts ...grpc.CallOption) (*VerifyChildExecutionCompletionRecordedResponse, error)
 	// DescribeWorkflowExecution returns information about the specified workflow execution.
 	DescribeWorkflowExecution(ctx context.Context, in *DescribeWorkflowExecutionRequest, opts ...grpc.CallOption) (*DescribeWorkflowExecutionResponse, error)
+	// ReplicateEventsV2 replicates workflow history events
 	ReplicateEventsV2(ctx context.Context, in *ReplicateEventsV2Request, opts ...grpc.CallOption) (*ReplicateEventsV2Response, error)
+	// ReplicateWorkflowState replicates workflow state
+	ReplicateWorkflowState(ctx context.Context, in *ReplicateWorkflowStateRequest, opts ...grpc.CallOption) (*ReplicateWorkflowStateResponse, error)
 	// SyncShardStatus sync the status between shards.
 	SyncShardStatus(ctx context.Context, in *SyncShardStatusRequest, opts ...grpc.CallOption) (*SyncShardStatusResponse, error)
 	// SyncActivity sync the activity status.
@@ -271,13 +312,26 @@ type HistoryServiceClient interface {
 	// GenerateLastHistoryReplicationTasks generate a replication task for last history event for requested workflow execution
 	GenerateLastHistoryReplicationTasks(ctx context.Context, in *GenerateLastHistoryReplicationTasksRequest, opts ...grpc.CallOption) (*GenerateLastHistoryReplicationTasksResponse, error)
 	GetReplicationStatus(ctx context.Context, in *GetReplicationStatusRequest, opts ...grpc.CallOption) (*GetReplicationStatusResponse, error)
+	// RebuildMutableState attempts to rebuild mutable state according to persisted history events.
+	RebuildMutableState(ctx context.Context, in *RebuildMutableStateRequest, opts ...grpc.CallOption) (*RebuildMutableStateResponse, error)
+	// DeleteWorkflowVisibilityRecord force delete a workflow's visibility record.
+	// This is used by admin delete workflow execution API to delete visibility record as frontend
+	// visibility manager doesn't support write operations
+	DeleteWorkflowVisibilityRecord(ctx context.Context, in *DeleteWorkflowVisibilityRecordRequest, opts ...grpc.CallOption) (*DeleteWorkflowVisibilityRecordResponse, error)
+	// (-- api-linter: core::0134=disabled
+	//     aip.dev/not-precedent: This service does not follow the update method API --)
+	UpdateWorkflowExecution(ctx context.Context, in *UpdateWorkflowExecutionRequest, opts ...grpc.CallOption) (*UpdateWorkflowExecutionResponse, error)
+	// (-- api-linter: core::0134=disabled
+	//     aip.dev/not-precedent: This service does not follow the update method API --)
+	PollWorkflowExecutionUpdate(ctx context.Context, in *PollWorkflowExecutionUpdateRequest, opts ...grpc.CallOption) (*PollWorkflowExecutionUpdateResponse, error)
+	StreamWorkflowReplicationMessages(ctx context.Context, opts ...grpc.CallOption) (HistoryService_StreamWorkflowReplicationMessagesClient, error)
 }
 
 type historyServiceClient struct {
-	cc *grpc.ClientConn
+	cc grpc.ClientConnInterface
 }
 
-func NewHistoryServiceClient(cc *grpc.ClientConn) HistoryServiceClient {
+func NewHistoryServiceClient(cc grpc.ClientConnInterface) HistoryServiceClient {
 	return &historyServiceClient{cc}
 }
 
@@ -353,6 +407,15 @@ func (c *historyServiceClient) RespondWorkflowTaskFailed(ctx context.Context, in
 	return out, nil
 }
 
+func (c *historyServiceClient) IsWorkflowTaskValid(ctx context.Context, in *IsWorkflowTaskValidRequest, opts ...grpc.CallOption) (*IsWorkflowTaskValidResponse, error) {
+	out := new(IsWorkflowTaskValidResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/IsWorkflowTaskValid", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *historyServiceClient) RecordActivityTaskHeartbeat(ctx context.Context, in *RecordActivityTaskHeartbeatRequest, opts ...grpc.CallOption) (*RecordActivityTaskHeartbeatResponse, error) {
 	out := new(RecordActivityTaskHeartbeatResponse)
 	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/RecordActivityTaskHeartbeat", in, out, opts...)
@@ -383,6 +446,15 @@ func (c *historyServiceClient) RespondActivityTaskFailed(ctx context.Context, in
 func (c *historyServiceClient) RespondActivityTaskCanceled(ctx context.Context, in *RespondActivityTaskCanceledRequest, opts ...grpc.CallOption) (*RespondActivityTaskCanceledResponse, error) {
 	out := new(RespondActivityTaskCanceledResponse)
 	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/RespondActivityTaskCanceled", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) IsActivityTaskValid(ctx context.Context, in *IsActivityTaskValidRequest, opts ...grpc.CallOption) (*IsActivityTaskValidResponse, error) {
+	out := new(IsActivityTaskValidResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/IsActivityTaskValid", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -425,6 +497,15 @@ func (c *historyServiceClient) TerminateWorkflowExecution(ctx context.Context, i
 	return out, nil
 }
 
+func (c *historyServiceClient) DeleteWorkflowExecution(ctx context.Context, in *DeleteWorkflowExecutionRequest, opts ...grpc.CallOption) (*DeleteWorkflowExecutionResponse, error) {
+	out := new(DeleteWorkflowExecutionResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/DeleteWorkflowExecution", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *historyServiceClient) ResetWorkflowExecution(ctx context.Context, in *ResetWorkflowExecutionRequest, opts ...grpc.CallOption) (*ResetWorkflowExecutionResponse, error) {
 	out := new(ResetWorkflowExecutionResponse)
 	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/ResetWorkflowExecution", in, out, opts...)
@@ -452,9 +533,27 @@ func (c *historyServiceClient) ScheduleWorkflowTask(ctx context.Context, in *Sch
 	return out, nil
 }
 
+func (c *historyServiceClient) VerifyFirstWorkflowTaskScheduled(ctx context.Context, in *VerifyFirstWorkflowTaskScheduledRequest, opts ...grpc.CallOption) (*VerifyFirstWorkflowTaskScheduledResponse, error) {
+	out := new(VerifyFirstWorkflowTaskScheduledResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/VerifyFirstWorkflowTaskScheduled", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *historyServiceClient) RecordChildExecutionCompleted(ctx context.Context, in *RecordChildExecutionCompletedRequest, opts ...grpc.CallOption) (*RecordChildExecutionCompletedResponse, error) {
 	out := new(RecordChildExecutionCompletedResponse)
 	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/RecordChildExecutionCompleted", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) VerifyChildExecutionCompletionRecorded(ctx context.Context, in *VerifyChildExecutionCompletionRecordedRequest, opts ...grpc.CallOption) (*VerifyChildExecutionCompletionRecordedResponse, error) {
+	out := new(VerifyChildExecutionCompletionRecordedResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/VerifyChildExecutionCompletionRecorded", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -473,6 +572,15 @@ func (c *historyServiceClient) DescribeWorkflowExecution(ctx context.Context, in
 func (c *historyServiceClient) ReplicateEventsV2(ctx context.Context, in *ReplicateEventsV2Request, opts ...grpc.CallOption) (*ReplicateEventsV2Response, error) {
 	out := new(ReplicateEventsV2Response)
 	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/ReplicateEventsV2", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) ReplicateWorkflowState(ctx context.Context, in *ReplicateWorkflowStateRequest, opts ...grpc.CallOption) (*ReplicateWorkflowStateResponse, error) {
+	out := new(ReplicateWorkflowStateResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/ReplicateWorkflowState", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -632,6 +740,73 @@ func (c *historyServiceClient) GetReplicationStatus(ctx context.Context, in *Get
 	return out, nil
 }
 
+func (c *historyServiceClient) RebuildMutableState(ctx context.Context, in *RebuildMutableStateRequest, opts ...grpc.CallOption) (*RebuildMutableStateResponse, error) {
+	out := new(RebuildMutableStateResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/RebuildMutableState", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) DeleteWorkflowVisibilityRecord(ctx context.Context, in *DeleteWorkflowVisibilityRecordRequest, opts ...grpc.CallOption) (*DeleteWorkflowVisibilityRecordResponse, error) {
+	out := new(DeleteWorkflowVisibilityRecordResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/DeleteWorkflowVisibilityRecord", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) UpdateWorkflowExecution(ctx context.Context, in *UpdateWorkflowExecutionRequest, opts ...grpc.CallOption) (*UpdateWorkflowExecutionResponse, error) {
+	out := new(UpdateWorkflowExecutionResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/UpdateWorkflowExecution", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) PollWorkflowExecutionUpdate(ctx context.Context, in *PollWorkflowExecutionUpdateRequest, opts ...grpc.CallOption) (*PollWorkflowExecutionUpdateResponse, error) {
+	out := new(PollWorkflowExecutionUpdateResponse)
+	err := c.cc.Invoke(ctx, "/temporal.server.api.historyservice.v1.HistoryService/PollWorkflowExecutionUpdate", in, out, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *historyServiceClient) StreamWorkflowReplicationMessages(ctx context.Context, opts ...grpc.CallOption) (HistoryService_StreamWorkflowReplicationMessagesClient, error) {
+	stream, err := c.cc.NewStream(ctx, &_HistoryService_serviceDesc.Streams[0], "/temporal.server.api.historyservice.v1.HistoryService/StreamWorkflowReplicationMessages", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &historyServiceStreamWorkflowReplicationMessagesClient{stream}
+	return x, nil
+}
+
+type HistoryService_StreamWorkflowReplicationMessagesClient interface {
+	Send(*StreamWorkflowReplicationMessagesRequest) error
+	Recv() (*StreamWorkflowReplicationMessagesResponse, error)
+	grpc.ClientStream
+}
+
+type historyServiceStreamWorkflowReplicationMessagesClient struct {
+	grpc.ClientStream
+}
+
+func (x *historyServiceStreamWorkflowReplicationMessagesClient) Send(m *StreamWorkflowReplicationMessagesRequest) error {
+	return x.ClientStream.SendMsg(m)
+}
+
+func (x *historyServiceStreamWorkflowReplicationMessagesClient) Recv() (*StreamWorkflowReplicationMessagesResponse, error) {
+	m := new(StreamWorkflowReplicationMessagesResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // HistoryServiceServer is the server API for HistoryService service.
 type HistoryServiceServer interface {
 	// StartWorkflowExecution starts a new long running workflow instance.  It will create the instance with
@@ -670,6 +845,8 @@ type HistoryServiceServer interface {
 	// WorkflowTaskFailedEvent written to the history and a new WorkflowTask created.  This API can be used by client to
 	// either clear sticky task queue or report ny panics during WorkflowTask processing.
 	RespondWorkflowTaskFailed(context.Context, *RespondWorkflowTaskFailedRequest) (*RespondWorkflowTaskFailedResponse, error)
+	// IsWorkflowTaskValid is called by matching service checking whether the workflow task is valid.
+	IsWorkflowTaskValid(context.Context, *IsWorkflowTaskValidRequest) (*IsWorkflowTaskValidResponse, error)
 	// RecordActivityTaskHeartbeat is called by application worker while it is processing an ActivityTask.  If worker fails
 	// to heartbeat within 'heartbeatTimeoutSeconds' interval for the ActivityTask, then it will be marked as timedout and
 	// 'ActivityTaskTimedOut' event will be written to the workflow history.  Calling 'RecordActivityTaskHeartbeat' will
@@ -694,6 +871,8 @@ type HistoryServiceServer interface {
 	// PollActivityTaskQueue API call for completion. It fails with 'EntityNotExistsError' if the taskToken is not valid
 	// anymore due to activity timeout.
 	RespondActivityTaskCanceled(context.Context, *RespondActivityTaskCanceledRequest) (*RespondActivityTaskCanceledResponse, error)
+	// IsActivityTaskValid is called by matching service checking whether the workflow task is valid.
+	IsActivityTaskValid(context.Context, *IsActivityTaskValidRequest) (*IsActivityTaskValidResponse, error)
 	// SignalWorkflowExecution is used to send a signal event to running workflow execution.  This results in
 	// WorkflowExecutionSignaled event recorded in the history and a workflow task being created for the execution.
 	SignalWorkflowExecution(context.Context, *SignalWorkflowExecutionRequest) (*SignalWorkflowExecutionResponse, error)
@@ -712,6 +891,10 @@ type HistoryServiceServer interface {
 	// TerminateWorkflowExecution terminates an existing workflow execution by recording WorkflowExecutionTerminated event
 	// in the history and immediately terminating the execution instance.
 	TerminateWorkflowExecution(context.Context, *TerminateWorkflowExecutionRequest) (*TerminateWorkflowExecutionResponse, error)
+	// DeleteWorkflowExecution asynchronously deletes a specific Workflow Execution (when WorkflowExecution.run_id is
+	// provided) or the latest Workflow Execution (when WorkflowExecution.run_id is not provided). If the Workflow
+	// Execution is Running, it will be terminated before deletion.
+	DeleteWorkflowExecution(context.Context, *DeleteWorkflowExecutionRequest) (*DeleteWorkflowExecutionResponse, error)
 	// ResetWorkflowExecution reset an existing workflow execution by a firstEventId of a existing event batch
 	// in the history and immediately terminating the current execution instance.
 	// After reset, the history will grow from nextFirstEventId.
@@ -726,12 +909,29 @@ type HistoryServiceServer interface {
 	// child execution without creating the workflow task and then calls this API after updating the mutable state of
 	// parent execution.
 	ScheduleWorkflowTask(context.Context, *ScheduleWorkflowTaskRequest) (*ScheduleWorkflowTaskResponse, error)
+	// VerifyFirstWorkflowTaskScheduled checks if workflow has its first workflow task scheduled.
+	// This is only used by standby transfer start child workflow task logic to make sure parent workflow has
+	// scheduled first workflow task in child after recording child started in its mutable state; otherwise,
+	// during namespace failover, it's possible that none of the clusters will schedule the first workflow task.
+	// NOTE: This is an experimental API. If later we found there are more verification API and there's a clear pattern
+	// of how verification is done, we may unify them into one generic verfication API.
+	VerifyFirstWorkflowTaskScheduled(context.Context, *VerifyFirstWorkflowTaskScheduledRequest) (*VerifyFirstWorkflowTaskScheduledResponse, error)
 	// RecordChildExecutionCompleted is used for reporting the completion of child workflow execution to parent.
 	// This is mainly called by transfer queue processor during the processing of DeleteExecution task.
 	RecordChildExecutionCompleted(context.Context, *RecordChildExecutionCompletedRequest) (*RecordChildExecutionCompletedResponse, error)
+	// VerifyChildExecutionCompletionRecorded checks if child completion result is recorded in parent workflow.
+	// This is only used by standby transfer close execution logic to make sure parent workflow has the result
+	// recorded before completing the task, otherwise during namespace failover, it's possible that none of the
+	// clusters will record the child result in parent workflow.
+	// NOTE: This is an experimental API. If later we found there are more verification API and there's a clear pattern
+	// of how verification is done, we may unify them into one generic verfication API.
+	VerifyChildExecutionCompletionRecorded(context.Context, *VerifyChildExecutionCompletionRecordedRequest) (*VerifyChildExecutionCompletionRecordedResponse, error)
 	// DescribeWorkflowExecution returns information about the specified workflow execution.
 	DescribeWorkflowExecution(context.Context, *DescribeWorkflowExecutionRequest) (*DescribeWorkflowExecutionResponse, error)
+	// ReplicateEventsV2 replicates workflow history events
 	ReplicateEventsV2(context.Context, *ReplicateEventsV2Request) (*ReplicateEventsV2Response, error)
+	// ReplicateWorkflowState replicates workflow state
+	ReplicateWorkflowState(context.Context, *ReplicateWorkflowStateRequest) (*ReplicateWorkflowStateResponse, error)
 	// SyncShardStatus sync the status between shards.
 	SyncShardStatus(context.Context, *SyncShardStatusRequest) (*SyncShardStatusResponse, error)
 	// SyncActivity sync the activity status.
@@ -767,6 +967,19 @@ type HistoryServiceServer interface {
 	// GenerateLastHistoryReplicationTasks generate a replication task for last history event for requested workflow execution
 	GenerateLastHistoryReplicationTasks(context.Context, *GenerateLastHistoryReplicationTasksRequest) (*GenerateLastHistoryReplicationTasksResponse, error)
 	GetReplicationStatus(context.Context, *GetReplicationStatusRequest) (*GetReplicationStatusResponse, error)
+	// RebuildMutableState attempts to rebuild mutable state according to persisted history events.
+	RebuildMutableState(context.Context, *RebuildMutableStateRequest) (*RebuildMutableStateResponse, error)
+	// DeleteWorkflowVisibilityRecord force delete a workflow's visibility record.
+	// This is used by admin delete workflow execution API to delete visibility record as frontend
+	// visibility manager doesn't support write operations
+	DeleteWorkflowVisibilityRecord(context.Context, *DeleteWorkflowVisibilityRecordRequest) (*DeleteWorkflowVisibilityRecordResponse, error)
+	// (-- api-linter: core::0134=disabled
+	//     aip.dev/not-precedent: This service does not follow the update method API --)
+	UpdateWorkflowExecution(context.Context, *UpdateWorkflowExecutionRequest) (*UpdateWorkflowExecutionResponse, error)
+	// (-- api-linter: core::0134=disabled
+	//     aip.dev/not-precedent: This service does not follow the update method API --)
+	PollWorkflowExecutionUpdate(context.Context, *PollWorkflowExecutionUpdateRequest) (*PollWorkflowExecutionUpdateResponse, error)
+	StreamWorkflowReplicationMessages(HistoryService_StreamWorkflowReplicationMessagesServer) error
 }
 
 // UnimplementedHistoryServiceServer can be embedded to have forward compatible implementations.
@@ -797,6 +1010,9 @@ func (*UnimplementedHistoryServiceServer) RespondWorkflowTaskCompleted(ctx conte
 func (*UnimplementedHistoryServiceServer) RespondWorkflowTaskFailed(ctx context.Context, req *RespondWorkflowTaskFailedRequest) (*RespondWorkflowTaskFailedResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RespondWorkflowTaskFailed not implemented")
 }
+func (*UnimplementedHistoryServiceServer) IsWorkflowTaskValid(ctx context.Context, req *IsWorkflowTaskValidRequest) (*IsWorkflowTaskValidResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IsWorkflowTaskValid not implemented")
+}
 func (*UnimplementedHistoryServiceServer) RecordActivityTaskHeartbeat(ctx context.Context, req *RecordActivityTaskHeartbeatRequest) (*RecordActivityTaskHeartbeatResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RecordActivityTaskHeartbeat not implemented")
 }
@@ -808,6 +1024,9 @@ func (*UnimplementedHistoryServiceServer) RespondActivityTaskFailed(ctx context.
 }
 func (*UnimplementedHistoryServiceServer) RespondActivityTaskCanceled(ctx context.Context, req *RespondActivityTaskCanceledRequest) (*RespondActivityTaskCanceledResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RespondActivityTaskCanceled not implemented")
+}
+func (*UnimplementedHistoryServiceServer) IsActivityTaskValid(ctx context.Context, req *IsActivityTaskValidRequest) (*IsActivityTaskValidResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method IsActivityTaskValid not implemented")
 }
 func (*UnimplementedHistoryServiceServer) SignalWorkflowExecution(ctx context.Context, req *SignalWorkflowExecutionRequest) (*SignalWorkflowExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SignalWorkflowExecution not implemented")
@@ -821,6 +1040,9 @@ func (*UnimplementedHistoryServiceServer) RemoveSignalMutableState(ctx context.C
 func (*UnimplementedHistoryServiceServer) TerminateWorkflowExecution(ctx context.Context, req *TerminateWorkflowExecutionRequest) (*TerminateWorkflowExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method TerminateWorkflowExecution not implemented")
 }
+func (*UnimplementedHistoryServiceServer) DeleteWorkflowExecution(ctx context.Context, req *DeleteWorkflowExecutionRequest) (*DeleteWorkflowExecutionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorkflowExecution not implemented")
+}
 func (*UnimplementedHistoryServiceServer) ResetWorkflowExecution(ctx context.Context, req *ResetWorkflowExecutionRequest) (*ResetWorkflowExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ResetWorkflowExecution not implemented")
 }
@@ -830,14 +1052,23 @@ func (*UnimplementedHistoryServiceServer) RequestCancelWorkflowExecution(ctx con
 func (*UnimplementedHistoryServiceServer) ScheduleWorkflowTask(ctx context.Context, req *ScheduleWorkflowTaskRequest) (*ScheduleWorkflowTaskResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ScheduleWorkflowTask not implemented")
 }
+func (*UnimplementedHistoryServiceServer) VerifyFirstWorkflowTaskScheduled(ctx context.Context, req *VerifyFirstWorkflowTaskScheduledRequest) (*VerifyFirstWorkflowTaskScheduledResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyFirstWorkflowTaskScheduled not implemented")
+}
 func (*UnimplementedHistoryServiceServer) RecordChildExecutionCompleted(ctx context.Context, req *RecordChildExecutionCompletedRequest) (*RecordChildExecutionCompletedResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method RecordChildExecutionCompleted not implemented")
+}
+func (*UnimplementedHistoryServiceServer) VerifyChildExecutionCompletionRecorded(ctx context.Context, req *VerifyChildExecutionCompletionRecordedRequest) (*VerifyChildExecutionCompletionRecordedResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method VerifyChildExecutionCompletionRecorded not implemented")
 }
 func (*UnimplementedHistoryServiceServer) DescribeWorkflowExecution(ctx context.Context, req *DescribeWorkflowExecutionRequest) (*DescribeWorkflowExecutionResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method DescribeWorkflowExecution not implemented")
 }
 func (*UnimplementedHistoryServiceServer) ReplicateEventsV2(ctx context.Context, req *ReplicateEventsV2Request) (*ReplicateEventsV2Response, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ReplicateEventsV2 not implemented")
+}
+func (*UnimplementedHistoryServiceServer) ReplicateWorkflowState(ctx context.Context, req *ReplicateWorkflowStateRequest) (*ReplicateWorkflowStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method ReplicateWorkflowState not implemented")
 }
 func (*UnimplementedHistoryServiceServer) SyncShardStatus(ctx context.Context, req *SyncShardStatusRequest) (*SyncShardStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SyncShardStatus not implemented")
@@ -889,6 +1120,21 @@ func (*UnimplementedHistoryServiceServer) GenerateLastHistoryReplicationTasks(ct
 }
 func (*UnimplementedHistoryServiceServer) GetReplicationStatus(ctx context.Context, req *GetReplicationStatusRequest) (*GetReplicationStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method GetReplicationStatus not implemented")
+}
+func (*UnimplementedHistoryServiceServer) RebuildMutableState(ctx context.Context, req *RebuildMutableStateRequest) (*RebuildMutableStateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method RebuildMutableState not implemented")
+}
+func (*UnimplementedHistoryServiceServer) DeleteWorkflowVisibilityRecord(ctx context.Context, req *DeleteWorkflowVisibilityRecordRequest) (*DeleteWorkflowVisibilityRecordResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method DeleteWorkflowVisibilityRecord not implemented")
+}
+func (*UnimplementedHistoryServiceServer) UpdateWorkflowExecution(ctx context.Context, req *UpdateWorkflowExecutionRequest) (*UpdateWorkflowExecutionResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method UpdateWorkflowExecution not implemented")
+}
+func (*UnimplementedHistoryServiceServer) PollWorkflowExecutionUpdate(ctx context.Context, req *PollWorkflowExecutionUpdateRequest) (*PollWorkflowExecutionUpdateResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method PollWorkflowExecutionUpdate not implemented")
+}
+func (*UnimplementedHistoryServiceServer) StreamWorkflowReplicationMessages(srv HistoryService_StreamWorkflowReplicationMessagesServer) error {
+	return status.Errorf(codes.Unimplemented, "method StreamWorkflowReplicationMessages not implemented")
 }
 
 func RegisterHistoryServiceServer(s *grpc.Server, srv HistoryServiceServer) {
@@ -1039,6 +1285,24 @@ func _HistoryService_RespondWorkflowTaskFailed_Handler(srv interface{}, ctx cont
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HistoryService_IsWorkflowTaskValid_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IsWorkflowTaskValidRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).IsWorkflowTaskValid(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/IsWorkflowTaskValid",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).IsWorkflowTaskValid(ctx, req.(*IsWorkflowTaskValidRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HistoryService_RecordActivityTaskHeartbeat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecordActivityTaskHeartbeatRequest)
 	if err := dec(in); err != nil {
@@ -1107,6 +1371,24 @@ func _HistoryService_RespondActivityTaskCanceled_Handler(srv interface{}, ctx co
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HistoryServiceServer).RespondActivityTaskCanceled(ctx, req.(*RespondActivityTaskCanceledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_IsActivityTaskValid_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(IsActivityTaskValidRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).IsActivityTaskValid(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/IsActivityTaskValid",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).IsActivityTaskValid(ctx, req.(*IsActivityTaskValidRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1183,6 +1465,24 @@ func _HistoryService_TerminateWorkflowExecution_Handler(srv interface{}, ctx con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HistoryService_DeleteWorkflowExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteWorkflowExecutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).DeleteWorkflowExecution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/DeleteWorkflowExecution",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).DeleteWorkflowExecution(ctx, req.(*DeleteWorkflowExecutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HistoryService_ResetWorkflowExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResetWorkflowExecutionRequest)
 	if err := dec(in); err != nil {
@@ -1237,6 +1537,24 @@ func _HistoryService_ScheduleWorkflowTask_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HistoryService_VerifyFirstWorkflowTaskScheduled_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyFirstWorkflowTaskScheduledRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).VerifyFirstWorkflowTaskScheduled(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/VerifyFirstWorkflowTaskScheduled",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).VerifyFirstWorkflowTaskScheduled(ctx, req.(*VerifyFirstWorkflowTaskScheduledRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _HistoryService_RecordChildExecutionCompleted_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RecordChildExecutionCompletedRequest)
 	if err := dec(in); err != nil {
@@ -1251,6 +1569,24 @@ func _HistoryService_RecordChildExecutionCompleted_Handler(srv interface{}, ctx 
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HistoryServiceServer).RecordChildExecutionCompleted(ctx, req.(*RecordChildExecutionCompletedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_VerifyChildExecutionCompletionRecorded_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(VerifyChildExecutionCompletionRecordedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).VerifyChildExecutionCompletionRecorded(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/VerifyChildExecutionCompletionRecorded",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).VerifyChildExecutionCompletionRecorded(ctx, req.(*VerifyChildExecutionCompletionRecordedRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1287,6 +1623,24 @@ func _HistoryService_ReplicateEventsV2_Handler(srv interface{}, ctx context.Cont
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(HistoryServiceServer).ReplicateEventsV2(ctx, req.(*ReplicateEventsV2Request))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_ReplicateWorkflowState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ReplicateWorkflowStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).ReplicateWorkflowState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/ReplicateWorkflowState",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).ReplicateWorkflowState(ctx, req.(*ReplicateWorkflowStateRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -1597,6 +1951,104 @@ func _HistoryService_GetReplicationStatus_Handler(srv interface{}, ctx context.C
 	return interceptor(ctx, in, info, handler)
 }
 
+func _HistoryService_RebuildMutableState_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(RebuildMutableStateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).RebuildMutableState(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/RebuildMutableState",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).RebuildMutableState(ctx, req.(*RebuildMutableStateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_DeleteWorkflowVisibilityRecord_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteWorkflowVisibilityRecordRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).DeleteWorkflowVisibilityRecord(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/DeleteWorkflowVisibilityRecord",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).DeleteWorkflowVisibilityRecord(ctx, req.(*DeleteWorkflowVisibilityRecordRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_UpdateWorkflowExecution_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UpdateWorkflowExecutionRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).UpdateWorkflowExecution(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/UpdateWorkflowExecution",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).UpdateWorkflowExecution(ctx, req.(*UpdateWorkflowExecutionRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_PollWorkflowExecutionUpdate_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(PollWorkflowExecutionUpdateRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(HistoryServiceServer).PollWorkflowExecutionUpdate(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/temporal.server.api.historyservice.v1.HistoryService/PollWorkflowExecutionUpdate",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(HistoryServiceServer).PollWorkflowExecutionUpdate(ctx, req.(*PollWorkflowExecutionUpdateRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _HistoryService_StreamWorkflowReplicationMessages_Handler(srv interface{}, stream grpc.ServerStream) error {
+	return srv.(HistoryServiceServer).StreamWorkflowReplicationMessages(&historyServiceStreamWorkflowReplicationMessagesServer{stream})
+}
+
+type HistoryService_StreamWorkflowReplicationMessagesServer interface {
+	Send(*StreamWorkflowReplicationMessagesResponse) error
+	Recv() (*StreamWorkflowReplicationMessagesRequest, error)
+	grpc.ServerStream
+}
+
+type historyServiceStreamWorkflowReplicationMessagesServer struct {
+	grpc.ServerStream
+}
+
+func (x *historyServiceStreamWorkflowReplicationMessagesServer) Send(m *StreamWorkflowReplicationMessagesResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
+func (x *historyServiceStreamWorkflowReplicationMessagesServer) Recv() (*StreamWorkflowReplicationMessagesRequest, error) {
+	m := new(StreamWorkflowReplicationMessagesRequest)
+	if err := x.ServerStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 var _HistoryService_serviceDesc = grpc.ServiceDesc{
 	ServiceName: "temporal.server.api.historyservice.v1.HistoryService",
 	HandlerType: (*HistoryServiceServer)(nil),
@@ -1634,6 +2086,10 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _HistoryService_RespondWorkflowTaskFailed_Handler,
 		},
 		{
+			MethodName: "IsWorkflowTaskValid",
+			Handler:    _HistoryService_IsWorkflowTaskValid_Handler,
+		},
+		{
 			MethodName: "RecordActivityTaskHeartbeat",
 			Handler:    _HistoryService_RecordActivityTaskHeartbeat_Handler,
 		},
@@ -1648,6 +2104,10 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RespondActivityTaskCanceled",
 			Handler:    _HistoryService_RespondActivityTaskCanceled_Handler,
+		},
+		{
+			MethodName: "IsActivityTaskValid",
+			Handler:    _HistoryService_IsActivityTaskValid_Handler,
 		},
 		{
 			MethodName: "SignalWorkflowExecution",
@@ -1666,6 +2126,10 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _HistoryService_TerminateWorkflowExecution_Handler,
 		},
 		{
+			MethodName: "DeleteWorkflowExecution",
+			Handler:    _HistoryService_DeleteWorkflowExecution_Handler,
+		},
+		{
 			MethodName: "ResetWorkflowExecution",
 			Handler:    _HistoryService_ResetWorkflowExecution_Handler,
 		},
@@ -1678,8 +2142,16 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 			Handler:    _HistoryService_ScheduleWorkflowTask_Handler,
 		},
 		{
+			MethodName: "VerifyFirstWorkflowTaskScheduled",
+			Handler:    _HistoryService_VerifyFirstWorkflowTaskScheduled_Handler,
+		},
+		{
 			MethodName: "RecordChildExecutionCompleted",
 			Handler:    _HistoryService_RecordChildExecutionCompleted_Handler,
+		},
+		{
+			MethodName: "VerifyChildExecutionCompletionRecorded",
+			Handler:    _HistoryService_VerifyChildExecutionCompletionRecorded_Handler,
 		},
 		{
 			MethodName: "DescribeWorkflowExecution",
@@ -1688,6 +2160,10 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ReplicateEventsV2",
 			Handler:    _HistoryService_ReplicateEventsV2_Handler,
+		},
+		{
+			MethodName: "ReplicateWorkflowState",
+			Handler:    _HistoryService_ReplicateWorkflowState_Handler,
 		},
 		{
 			MethodName: "SyncShardStatus",
@@ -1757,7 +2233,30 @@ var _HistoryService_serviceDesc = grpc.ServiceDesc{
 			MethodName: "GetReplicationStatus",
 			Handler:    _HistoryService_GetReplicationStatus_Handler,
 		},
+		{
+			MethodName: "RebuildMutableState",
+			Handler:    _HistoryService_RebuildMutableState_Handler,
+		},
+		{
+			MethodName: "DeleteWorkflowVisibilityRecord",
+			Handler:    _HistoryService_DeleteWorkflowVisibilityRecord_Handler,
+		},
+		{
+			MethodName: "UpdateWorkflowExecution",
+			Handler:    _HistoryService_UpdateWorkflowExecution_Handler,
+		},
+		{
+			MethodName: "PollWorkflowExecutionUpdate",
+			Handler:    _HistoryService_PollWorkflowExecutionUpdate_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "StreamWorkflowReplicationMessages",
+			Handler:       _HistoryService_StreamWorkflowReplicationMessages_Handler,
+			ServerStreams: true,
+			ClientStreams: true,
+		},
+	},
 	Metadata: "temporal/server/api/historyservice/v1/service.proto",
 }

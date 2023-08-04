@@ -43,6 +43,10 @@ const (
 		`WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 AND ((node_id = $4 AND txn_id > $5) OR node_id > $6) AND node_id < $7 ` +
 		`ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT $8 `
 
+	getHistoryNodesReverseQuery = `SELECT node_id, prev_txn_id, txn_id, data, data_encoding FROM history_node ` +
+		`WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 AND node_id >= $4 AND ((node_id = $5 AND txn_id < $6) OR node_id < $7) ` +
+		`ORDER BY shard_id, tree_id, branch_id DESC, node_id DESC, txn_id DESC LIMIT $8 `
+
 	getHistoryNodeMetadataQuery = `SELECT node_id, prev_txn_id, txn_id FROM history_node ` +
 		`WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 AND ((node_id = $4 AND txn_id > $5) OR node_id > $6) AND node_id < $7 ` +
 		`ORDER BY shard_id, tree_id, branch_id, node_id, txn_id LIMIT $8 `
@@ -59,6 +63,12 @@ const (
 		`SET data = excluded.data, data_encoding = excluded.data_encoding`
 
 	getHistoryTreeQuery = `SELECT branch_id, data, data_encoding FROM history_tree WHERE shard_id = $1 AND tree_id = $2 `
+
+	paginateBranchesQuery = `SELECT shard_id, tree_id, branch_id, data, data_encoding
+        FROM history_tree
+        WHERE (shard_id, tree_id, branch_id) > ($1, $2, $3)
+        ORDER BY shard_id, tree_id, branch_id
+        LIMIT $4`
 
 	deleteHistoryTreeQuery = `DELETE FROM history_tree WHERE shard_id = $1 AND tree_id = $2 AND branch_id = $3 `
 )
@@ -103,23 +113,39 @@ func (pdb *db) RangeSelectFromHistoryNode(
 	var query string
 	if filter.MetadataOnly {
 		query = getHistoryNodeMetadataQuery
+	} else if filter.ReverseOrder {
+		query = getHistoryNodesReverseQuery
 	} else {
 		query = getHistoryNodesQuery
 	}
 
+	var args []interface{}
+	if filter.ReverseOrder {
+		args = []interface{}{
+			filter.ShardID,
+			filter.TreeID,
+			filter.BranchID,
+			filter.MinNodeID,
+			filter.MaxTxnID,
+			-filter.MaxTxnID,
+			filter.MaxNodeID,
+			filter.PageSize,
+		}
+	} else {
+		args = []interface{}{
+			filter.ShardID,
+			filter.TreeID,
+			filter.BranchID,
+			filter.MinNodeID,
+			-filter.MinTxnID, // NOTE: transaction ID is *= -1 when stored
+			filter.MinNodeID,
+			filter.MaxNodeID,
+			filter.PageSize,
+		}
+	}
+
 	var rows []sqlplugin.HistoryNodeRow
-	err := pdb.conn.SelectContext(ctx,
-		&rows,
-		query,
-		filter.ShardID,
-		filter.TreeID,
-		filter.BranchID,
-		filter.MinNodeID,
-		-filter.MinTxnID, // NOTE: transaction ID is *= -1 when stored
-		filter.MinNodeID,
-		filter.MaxNodeID,
-		filter.PageSize,
-	)
+	err := pdb.conn.SelectContext(ctx, &rows, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -168,6 +194,24 @@ func (pdb *db) SelectFromHistoryTree(
 		getHistoryTreeQuery,
 		filter.ShardID,
 		filter.TreeID,
+	)
+	return rows, err
+}
+
+// PaginateBranchesFromHistoryTree reads up to page.Limit rows from the history_tree table sorted by their primary key,
+// while skipping the first page.Offset rows.
+func (pdb *db) PaginateBranchesFromHistoryTree(
+	ctx context.Context,
+	page sqlplugin.HistoryTreeBranchPage,
+) ([]sqlplugin.HistoryTreeRow, error) {
+	var rows []sqlplugin.HistoryTreeRow
+	err := pdb.conn.SelectContext(ctx,
+		&rows,
+		paginateBranchesQuery,
+		page.ShardID,
+		page.TreeID,
+		page.BranchID,
+		page.Limit,
 	)
 	return rows, err
 }

@@ -25,20 +25,14 @@
 package sql
 
 import (
-	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/log"
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
 	"go.temporal.io/server/common/resolver"
-)
-
-const (
-	executionTimeout = 8 * time.Second
 )
 
 type (
@@ -193,15 +187,7 @@ func (c *DbConn) Close() error {
 	defer c.Unlock()
 	c.refCnt--
 	if c.refCnt == 0 {
-		err := c.DB.Close()
-		c.DB = nil
-		return err
+		return c.DB.Close()
 	}
 	return nil
-}
-
-// TODO remove this function when NoSQL & SQL layer all support context timeout
-func newExecutionContext() (context.Context, context.CancelFunc) {
-	ctx := context.Background()
-	return context.WithTimeout(ctx, executionTimeout)
 }

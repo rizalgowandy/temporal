@@ -39,7 +39,7 @@ import (
 )
 
 var (
-	pumpTestMetrics *metrics.MockClient
+	pumpTestMetrics *metrics.MockHandler
 	pumpTestLogger  *log.MockLogger
 )
 
@@ -62,8 +62,9 @@ func (s *pumpSuite) registerWorkflows(env *testsuite.TestWorkflowEnvironment) {
 
 func (s *pumpSuite) SetupTest() {
 	s.controller = gomock.NewController(s.T())
-	pumpTestMetrics = metrics.NewMockClient(s.controller)
-	pumpTestMetrics.EXPECT().StartTimer(gomock.Any(), gomock.Any()).Return(metrics.NopStopwatch())
+	pumpTestMetrics = metrics.NewMockHandler(s.controller)
+	pumpTestMetrics.EXPECT().Timer(gomock.Any()).Return(metrics.NoopTimerMetricFunc)
+	pumpTestMetrics.EXPECT().WithTags(metrics.OperationTag(metrics.ArchiverPumpScope)).Return(pumpTestMetrics)
 	pumpTestLogger = log.NewMockLogger(s.controller)
 }
 
@@ -71,7 +72,7 @@ func (s *pumpSuite) TearDownTest() {
 }
 
 func (s *pumpSuite) TestPumpRun_CarryoverLargerThanLimit() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(1))
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -83,7 +84,7 @@ func (s *pumpSuite) TestPumpRun_CarryoverLargerThanLimit() {
 }
 
 func (s *pumpSuite) TestPumpRun_CarryoverExactlyMatchesLimit() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -95,9 +96,9 @@ func (s *pumpSuite) TestPumpRun_CarryoverExactlyMatchesLimit() {
 }
 
 func (s *pumpSuite) TestPumpRun_TimeoutWithoutSignals() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpTimeoutCount)
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpTimeoutWithoutSignalsCount)
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpTimeoutCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpTimeoutWithoutSignalsCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -109,8 +110,8 @@ func (s *pumpSuite) TestPumpRun_TimeoutWithoutSignals() {
 }
 
 func (s *pumpSuite) TestPumpRun_TimeoutWithSignals() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpTimeoutCount)
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpTimeoutCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -122,8 +123,8 @@ func (s *pumpSuite) TestPumpRun_TimeoutWithSignals() {
 }
 
 func (s *pumpSuite) TestPumpRun_SignalsGottenSatisfyLimit() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpSignalThresholdCount)
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpSignalThresholdCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -135,8 +136,8 @@ func (s *pumpSuite) TestPumpRun_SignalsGottenSatisfyLimit() {
 }
 
 func (s *pumpSuite) TestPumpRun_SignalsAndCarryover() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpSignalThresholdCount)
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpSignalThresholdCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
 
 	env := s.NewTestWorkflowEnvironment()
 	s.registerWorkflows(env)
@@ -148,8 +149,9 @@ func (s *pumpSuite) TestPumpRun_SignalsAndCarryover() {
 }
 
 func (s *pumpSuite) TestPumpRun_SignalChannelClosedUnexpectedly() {
-	pumpTestMetrics.EXPECT().UpdateGauge(metrics.ArchiverPumpScope, metrics.ArchiverBacklogSizeGauge, float64(0))
-	pumpTestMetrics.EXPECT().IncCounter(metrics.ArchiverPumpScope, metrics.ArchiverPumpSignalChannelClosedCount)
+	pumpTestMetrics.EXPECT().Gauge(metrics.ArchiverBacklogSizeGauge.GetMetricName()).Return(metrics.NoopGaugeMetricFunc)
+	pumpTestMetrics.EXPECT().Counter(metrics.ArchiverPumpSignalChannelClosedCount.GetMetricName()).Return(metrics.NoopCounterMetricFunc)
+
 	pumpTestLogger.EXPECT().Error(gomock.Any(), gomock.Any())
 
 	env := s.NewTestWorkflowEnvironment()
@@ -244,8 +246,8 @@ func signalAndCarryoverPumpWorkflow(ctx workflow.Context, requestLimit int, carr
 }
 
 func sendRequestsToChannel(ctx workflow.Context, ch workflow.Channel, numRequests int) ([]ArchiveRequest, []uint64) {
-	requests := make([]ArchiveRequest, numRequests, numRequests)
-	hashes := make([]uint64, numRequests, numRequests)
+	requests := make([]ArchiveRequest, numRequests)
+	hashes := make([]uint64, numRequests)
 	workflow.Go(ctx, func(ctx workflow.Context) {
 		for i := 0; i < numRequests; i++ {
 			requests[i], hashes[i] = randomArchiveRequest()
@@ -256,8 +258,8 @@ func sendRequestsToChannel(ctx workflow.Context, ch workflow.Channel, numRequest
 }
 
 func sendRequestsToChannelBlocking(ctx workflow.Context, ch workflow.Channel, numRequests int) ([]ArchiveRequest, []uint64) {
-	requests := make([]ArchiveRequest, numRequests, numRequests)
-	hashes := make([]uint64, numRequests, numRequests)
+	requests := make([]ArchiveRequest, numRequests)
+	hashes := make([]uint64, numRequests)
 	for i := 0; i < numRequests; i++ {
 		requests[i], hashes[i] = randomArchiveRequest()
 		ch.Send(ctx, requests[i])
@@ -275,15 +277,12 @@ func channelContainsExpected(ctx workflow.Context, ch workflow.Channel, expected
 			return false
 		}
 	}
-	if ch.Receive(ctx, nil) {
-		return false
-	}
-	return true
+	return !ch.Receive(ctx, nil)
 }
 
 func randomCarryover(count int) ([]ArchiveRequest, []uint64) {
-	carryover := make([]ArchiveRequest, count, count)
-	hashes := make([]uint64, count, count)
+	carryover := make([]ArchiveRequest, count)
+	hashes := make([]uint64, count)
 	for i := 0; i < count; i++ {
 		carryover[i], hashes[i] = randomArchiveRequest()
 	}

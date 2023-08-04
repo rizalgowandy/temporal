@@ -25,7 +25,9 @@
 package cassandra
 
 import (
+	"context"
 	"fmt"
+	"time"
 
 	"go.temporal.io/api/serviceerror"
 
@@ -33,6 +35,7 @@ import (
 	p "go.temporal.io/server/common/persistence"
 	"go.temporal.io/server/common/persistence/nosql/nosqlplugin/cassandra/gocql"
 	"go.temporal.io/server/common/persistence/serialization"
+	"go.temporal.io/server/service/history/tasks"
 )
 
 const (
@@ -52,17 +55,11 @@ const (
 		`shard_id, type, namespace_id, workflow_id, run_id, timer, timer_encoding, visibility_ts, task_id) ` +
 		`VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	templateGetTransferTaskQuery = `SELECT transfer, transfer_encoding ` +
-		`FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id = ? `
+	templateCreateHistoryTaskQuery = `INSERT INTO executions (` +
+		`shard_id, type, namespace_id, workflow_id, run_id, task_data, task_encoding, visibility_ts, task_id) ` +
+		`VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`
 
-	templateGetTransferTasksQuery = `SELECT transfer, transfer_encoding ` +
+	templateGetHistoryImmediateTasksQuery = `SELECT task_id, task_data, task_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ? ` +
@@ -70,20 +67,20 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
+		`and task_id >= ? ` +
+		`and task_id < ?`
 
-	templateGetVisibilityTaskQuery = `SELECT visibility_task_data, visibility_task_encoding ` +
+	templateGetHistoryScheduledTasksQuery = `SELECT visibility_ts, task_id, task_data, task_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
-		`and type = ? ` +
+		`and type = ?` +
 		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id = ? `
+		`and workflow_id = ?` +
+		`and run_id = ?` +
+		`and visibility_ts >= ? ` +
+		`and visibility_ts < ?`
 
-	templateGetVisibilityTasksQuery = `SELECT visibility_task_data, visibility_task_encoding ` +
+	templateGetTransferTasksQuery = `SELECT task_id, transfer, transfer_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ? ` +
@@ -91,10 +88,10 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
+		`and task_id >= ? ` +
+		`and task_id < ?`
 
-	templateGetTieredStorageTaskQuery = `SELECT tiered_storage_task_data, tiered_storage_task_encoding ` +
+	templateGetVisibilityTasksQuery = `SELECT task_id, visibility_task_data, visibility_task_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ? ` +
@@ -102,9 +99,10 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id = ? `
+		`and task_id >= ? ` +
+		`and task_id < ?`
 
-	templateGetTieredStorageTasksQuery = `SELECT tiered_storage_task_data, tiered_storage_task_encoding ` +
+	templateGetReplicationTasksQuery = `SELECT task_id, replication, replication_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ? ` +
@@ -112,10 +110,10 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
+		`and task_id >= ? ` +
+		`and task_id < ?`
 
-	templateGetReplicationTaskQuery = `SELECT replication, replication_encoding ` +
+	templateIsQueueEmptyQuery = `SELECT task_id ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ? ` +
@@ -123,18 +121,8 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id = ? `
-
-	templateGetReplicationTasksQuery = `SELECT replication, replication_encoding ` +
-		`FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
+		`and task_id >= ? ` +
+		`limit 1`
 
 	templateCompleteTransferTaskQuery = `DELETE FROM executions ` +
 		`WHERE shard_id = ? ` +
@@ -152,71 +140,24 @@ const (
 		`and workflow_id = ? ` +
 		`and run_id = ? ` +
 		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
+		`and task_id >= ? ` +
+		`and task_id < ?`
 
-	templateCompleteVisibilityTaskQuery = `DELETE FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id = ?`
+	templateCompleteVisibilityTaskQuery = templateCompleteTransferTaskQuery
 
-	templateCompleteTieredStorageTaskQuery = `DELETE FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id = ?`
-
-	templateRangeCompleteVisibilityTaskQuery = `DELETE FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
-
-	templateRangeCompleteTieredStorageTaskQuery = `DELETE FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
-
-	templateCompleteReplicationTaskBeforeQuery = `DELETE FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id <= ?`
+	templateRangeCompleteVisibilityTaskQuery = templateRangeCompleteTransferTaskQuery
 
 	templateCompleteReplicationTaskQuery = templateCompleteTransferTaskQuery
 
 	templateRangeCompleteReplicationTaskQuery = templateRangeCompleteTransferTaskQuery
 
-	templateGetTimerTaskQuery = `SELECT timer, timer_encoding ` +
-		`FROM executions ` +
-		`WHERE shard_id = ? ` +
-		`and type = ? ` +
-		`and namespace_id = ? ` +
-		`and workflow_id = ? ` +
-		`and run_id = ? ` +
-		`and visibility_ts = ? ` +
-		`and task_id = ? `
+	templateCompleteHistoryTaskQuery = templateCompleteTransferTaskQuery
 
-	templateGetTimerTasksQuery = `SELECT timer, timer_encoding ` +
+	templateRangeCompleteHistoryImmediateTasksQuery = templateRangeCompleteTransferTaskQuery
+
+	templateRangeCompleteHistoryScheduledTasksQuery = templateRangeCompleteTimerTaskQuery
+
+	templateGetTimerTasksQuery = `SELECT visibility_ts, task_id, timer, timer_encoding ` +
 		`FROM executions ` +
 		`WHERE shard_id = ? ` +
 		`and type = ?` +
@@ -243,97 +184,6 @@ const (
 		`and run_id = ?` +
 		`and visibility_ts >= ? ` +
 		`and visibility_ts < ?`
-
-	templateCreateTaskQuery = `INSERT INTO tasks (` +
-		`namespace_id, task_queue_name, task_queue_type, type, task_id, task, task_encoding) ` +
-		`VALUES(?, ?, ?, ?, ?, ?, ?)`
-
-	templateCreateTaskWithTTLQuery = `INSERT INTO tasks (` +
-		`namespace_id, task_queue_name, task_queue_type, type, task_id, task, task_encoding) ` +
-		`VALUES(?, ?, ?, ?, ?, ?, ?) USING TTL ?`
-
-	templateGetTasksQuery = `SELECT task_id, task, task_encoding ` +
-		`FROM tasks ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and task_id > ? ` +
-		`and task_id <= ?`
-
-	templateCompleteTaskQuery = `DELETE FROM tasks ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and task_id = ?`
-
-	templateCompleteTasksLessThanQuery = `DELETE FROM tasks ` +
-		`WHERE namespace_id = ? ` +
-		`AND task_queue_name = ? ` +
-		`AND task_queue_type = ? ` +
-		`AND type = ? ` +
-		`AND task_id <= ? `
-
-	templateGetTaskQueue = `SELECT ` +
-		`range_id, ` +
-		`task_queue, ` +
-		`task_queue_encoding ` +
-		`FROM tasks ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and task_id = ?`
-
-	templateInsertTaskQueueQuery = `INSERT INTO tasks (` +
-		`namespace_id, ` +
-		`task_queue_name, ` +
-		`task_queue_type, ` +
-		`type, ` +
-		`task_id, ` +
-		`range_id, ` +
-		`task_queue, ` +
-		`task_queue_encoding ` +
-		`) VALUES (?, ?, ?, ?, ?, ?, ?, ?) IF NOT EXISTS`
-
-	templateUpdateTaskQueueQuery = `UPDATE tasks SET ` +
-		`range_id = ?, ` +
-		`task_queue = ?, ` +
-		`task_queue_encoding = ? ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and task_id = ? ` +
-		`IF range_id = ?`
-
-	templateUpdateTaskQueueQueryWithTTLPart1 = `INSERT INTO tasks (` +
-		`namespace_id, ` +
-		`task_queue_name, ` +
-		`task_queue_type, ` +
-		`type, ` +
-		`task_id ` +
-		`) VALUES (?, ?, ?, ?, ?) USING TTL ?`
-
-	templateUpdateTaskQueueQueryWithTTLPart2 = `UPDATE tasks USING TTL ? SET ` +
-		`range_id = ?, ` +
-		`task_queue = ?, ` +
-		`task_queue_encoding = ? ` +
-		`WHERE namespace_id = ? ` +
-		`and task_queue_name = ? ` +
-		`and task_queue_type = ? ` +
-		`and type = ? ` +
-		`and task_id = ? ` +
-		`IF range_id = ?`
-
-	templateDeleteTaskQueueQuery = `DELETE FROM tasks ` +
-		`WHERE namespace_id = ? ` +
-		`AND task_queue_name = ? ` +
-		`AND task_queue_type = ? ` +
-		`AND type = ? ` +
-		`AND task_id = ? ` +
-		`IF range_id = ?`
 )
 
 type (
@@ -353,18 +203,38 @@ func NewMutableStateTaskStore(
 	}
 }
 
-func (d *MutableStateTaskStore) AddTasks(
-	request *p.InternalAddTasksRequest,
+func (d *MutableStateTaskStore) RegisterHistoryTaskReader(
+	_ context.Context,
+	_ *p.RegisterHistoryTaskReaderRequest,
 ) error {
-	batch := d.Session.NewBatch(gocql.LoggedBatch)
+	// no-op
+	return nil
+}
+
+func (d *MutableStateTaskStore) UnregisterHistoryTaskReader(
+	_ context.Context,
+	_ *p.UnregisterHistoryTaskReaderRequest,
+) {
+	// no-op
+}
+
+func (d *MutableStateTaskStore) UpdateHistoryTaskReaderProgress(
+	_ context.Context,
+	_ *p.UpdateHistoryTaskReaderProgressRequest,
+) {
+	// no-op
+}
+
+func (d *MutableStateTaskStore) AddHistoryTasks(
+	ctx context.Context,
+	request *p.InternalAddHistoryTasksRequest,
+) error {
+	batch := d.Session.NewBatch(gocql.LoggedBatch).WithContext(ctx)
 
 	if err := applyTasks(
 		batch,
 		request.ShardID,
-		request.TransferTasks,
-		request.TimerTasks,
-		request.ReplicationTasks,
-		request.VisibilityTasks,
+		request.Tasks,
 	); err != nil {
 		return err
 	}
@@ -404,31 +274,64 @@ func (d *MutableStateTaskStore) AddTasks(
 	return nil
 }
 
-func (d *MutableStateTaskStore) GetTransferTask(
-	request *p.GetTransferTaskRequest,
-) (*p.InternalGetTransferTaskResponse, error) {
-	shardID := request.ShardID
-	taskID := request.TaskID
-	query := d.Session.Query(templateGetTransferTaskQuery,
-		shardID,
-		rowTypeTransferTask,
-		rowTypeTransferNamespaceID,
-		rowTypeTransferWorkflowID,
-		rowTypeTransferRunID,
-		defaultVisibilityTimestamp,
-		taskID)
-
-	var data []byte
-	var encoding string
-	if err := query.Scan(&data, &encoding); err != nil {
-		return nil, gocql.ConvertError("GetTransferTask", err)
+func (d *MutableStateTaskStore) GetHistoryTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	switch request.TaskCategory.ID() {
+	case tasks.CategoryIDTransfer:
+		return d.getTransferTasks(ctx, request)
+	case tasks.CategoryIDTimer:
+		return d.getTimerTasks(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return d.getVisibilityTasks(ctx, request)
+	case tasks.CategoryIDReplication:
+		return d.getReplicationTasks(ctx, request)
+	default:
+		return d.getHistoryTasks(ctx, request)
 	}
-	return &p.InternalGetTransferTaskResponse{Task: *p.NewDataBlob(data, encoding)}, nil
 }
 
-func (d *MutableStateTaskStore) GetTransferTasks(
-	request *p.GetTransferTasksRequest,
-) (*p.InternalGetTransferTasksResponse, error) {
+func (d *MutableStateTaskStore) CompleteHistoryTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
+) error {
+	switch request.TaskCategory.ID() {
+	case tasks.CategoryIDTransfer:
+		return d.completeTransferTask(ctx, request)
+	case tasks.CategoryIDTimer:
+		return d.completeTimerTask(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return d.completeVisibilityTask(ctx, request)
+	case tasks.CategoryIDReplication:
+		return d.completeReplicationTask(ctx, request)
+	default:
+		return d.completeHistoryTask(ctx, request)
+	}
+}
+
+func (d *MutableStateTaskStore) RangeCompleteHistoryTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
+) error {
+	switch request.TaskCategory.ID() {
+	case tasks.CategoryIDTransfer:
+		return d.rangeCompleteTransferTasks(ctx, request)
+	case tasks.CategoryIDTimer:
+		return d.rangeCompleteTimerTasks(ctx, request)
+	case tasks.CategoryIDVisibility:
+		return d.rangeCompleteVisibilityTasks(ctx, request)
+	case tasks.CategoryIDReplication:
+		return d.rangeCompleteReplicationTasks(ctx, request)
+	default:
+		return d.rangeCompleteHistoryTasks(ctx, request)
+	}
+}
+
+func (d *MutableStateTaskStore) getTransferTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
 
 	// Reading transfer tasks need to be quorum level consistent, otherwise we could lose task
 	query := d.Session.Query(templateGetTransferTasksQuery,
@@ -438,18 +341,23 @@ func (d *MutableStateTaskStore) GetTransferTasks(
 		rowTypeTransferWorkflowID,
 		rowTypeTransferRunID,
 		defaultVisibilityTimestamp,
-		request.ReadLevel,
-		request.MaxReadLevel,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
 
-	response := &p.InternalGetTransferTasksResponse{}
+	response := &p.InternalGetHistoryTasksResponse{}
+	var taskID int64
 	var data []byte
 	var encoding string
 
-	for iter.Scan(&data, &encoding) {
-		response.Tasks = append(response.Tasks, *p.NewDataBlob(data, encoding))
+	for iter.Scan(&taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
 
+		taskID = 0
 		data = nil
 		encoding = ""
 	}
@@ -464,8 +372,9 @@ func (d *MutableStateTaskStore) GetTransferTasks(
 	return response, nil
 }
 
-func (d *MutableStateTaskStore) CompleteTransferTask(
-	request *p.CompleteTransferTaskRequest,
+func (d *MutableStateTaskStore) completeTransferTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
 	query := d.Session.Query(templateCompleteTransferTaskQuery,
 		request.ShardID,
@@ -474,14 +383,16 @@ func (d *MutableStateTaskStore) CompleteTransferTask(
 		rowTypeTransferWorkflowID,
 		rowTypeTransferRunID,
 		defaultVisibilityTimestamp,
-		request.TaskID)
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("CompleteTransferTask", err)
 }
 
-func (d *MutableStateTaskStore) RangeCompleteTransferTask(
-	request *p.RangeCompleteTransferTaskRequest,
+func (d *MutableStateTaskStore) rangeCompleteTransferTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
 	query := d.Session.Query(templateRangeCompleteTransferTaskQuery,
 		request.ShardID,
@@ -490,44 +401,21 @@ func (d *MutableStateTaskStore) RangeCompleteTransferTask(
 		rowTypeTransferWorkflowID,
 		rowTypeTransferRunID,
 		defaultVisibilityTimestamp,
-		request.ExclusiveBeginTaskID,
-		request.InclusiveEndTaskID,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("RangeCompleteTransferTask", err)
 }
 
-func (d *MutableStateTaskStore) GetTimerTask(
-	request *p.GetTimerTaskRequest,
-) (*p.InternalGetTimerTaskResponse, error) {
-	shardID := request.ShardID
-	taskID := request.TaskID
-	visibilityTs := request.VisibilityTimestamp
-	query := d.Session.Query(templateGetTimerTaskQuery,
-		shardID,
-		rowTypeTimerTask,
-		rowTypeTimerNamespaceID,
-		rowTypeTimerWorkflowID,
-		rowTypeTimerRunID,
-		visibilityTs,
-		taskID)
-
-	var data []byte
-	var encoding string
-	if err := query.Scan(&data, &encoding); err != nil {
-		return nil, gocql.ConvertError("GetTimerTask", err)
-	}
-
-	return &p.InternalGetTimerTaskResponse{Task: *p.NewDataBlob(data, encoding)}, nil
-}
-
-func (d *MutableStateTaskStore) GetTimerTasks(
-	request *p.GetTimerTasksRequest,
-) (*p.InternalGetTimerTasksResponse, error) {
+func (d *MutableStateTaskStore) getTimerTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
 	// Reading timer tasks need to be quorum level consistent, otherwise we could lose tasks
-	minTimestamp := p.UnixMilliseconds(request.MinTimestamp)
-	maxTimestamp := p.UnixMilliseconds(request.MaxTimestamp)
+	minTimestamp := p.UnixMilliseconds(request.InclusiveMinTaskKey.FireTime)
+	maxTimestamp := p.UnixMilliseconds(request.ExclusiveMaxTaskKey.FireTime)
 	query := d.Session.Query(templateGetTimerTasksQuery,
 		request.ShardID,
 		rowTypeTimerTask,
@@ -536,16 +424,23 @@ func (d *MutableStateTaskStore) GetTimerTasks(
 		rowTypeTimerRunID,
 		minTimestamp,
 		maxTimestamp,
-	)
+	).WithContext(ctx)
 	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
 
-	response := &p.InternalGetTimerTasksResponse{}
+	response := &p.InternalGetHistoryTasksResponse{}
+	var timestamp time.Time
+	var taskID int64
 	var data []byte
 	var encoding string
 
-	for iter.Scan(&data, &encoding) {
-		response.Tasks = append(response.Tasks, *p.NewDataBlob(data, encoding))
+	for iter.Scan(&timestamp, &taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewKey(timestamp, taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
 
+		timestamp = time.Time{}
+		taskID = 0
 		data = nil
 		encoding = ""
 	}
@@ -560,10 +455,11 @@ func (d *MutableStateTaskStore) GetTimerTasks(
 	return response, nil
 }
 
-func (d *MutableStateTaskStore) CompleteTimerTask(
-	request *p.CompleteTimerTaskRequest,
+func (d *MutableStateTaskStore) completeTimerTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
-	ts := p.UnixMilliseconds(request.VisibilityTimestamp)
+	ts := p.UnixMilliseconds(request.TaskKey.FireTime)
 	query := d.Session.Query(templateCompleteTimerTaskQuery,
 		request.ShardID,
 		rowTypeTimerTask,
@@ -571,17 +467,19 @@ func (d *MutableStateTaskStore) CompleteTimerTask(
 		rowTypeTimerWorkflowID,
 		rowTypeTimerRunID,
 		ts,
-		request.TaskID)
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("CompleteTimerTask", err)
 }
 
-func (d *MutableStateTaskStore) RangeCompleteTimerTask(
-	request *p.RangeCompleteTimerTaskRequest,
+func (d *MutableStateTaskStore) rangeCompleteTimerTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	start := p.UnixMilliseconds(request.InclusiveBeginTimestamp)
-	end := p.UnixMilliseconds(request.ExclusiveEndTimestamp)
+	start := p.UnixMilliseconds(request.InclusiveMinTaskKey.FireTime)
+	end := p.UnixMilliseconds(request.ExclusiveMaxTaskKey.FireTime)
 	query := d.Session.Query(templateRangeCompleteTimerTaskQuery,
 		request.ShardID,
 		rowTypeTimerTask,
@@ -590,38 +488,16 @@ func (d *MutableStateTaskStore) RangeCompleteTimerTask(
 		rowTypeTimerRunID,
 		start,
 		end,
-	)
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("RangeCompleteTimerTask", err)
 }
 
-func (d *MutableStateTaskStore) GetReplicationTask(
-	request *p.GetReplicationTaskRequest,
-) (*p.InternalGetReplicationTaskResponse, error) {
-	shardID := request.ShardID
-	taskID := request.TaskID
-	query := d.Session.Query(templateGetReplicationTaskQuery,
-		shardID,
-		rowTypeReplicationTask,
-		rowTypeReplicationNamespaceID,
-		rowTypeReplicationWorkflowID,
-		rowTypeReplicationRunID,
-		defaultVisibilityTimestamp,
-		taskID)
-
-	var data []byte
-	var encoding string
-	if err := query.Scan(&data, &encoding); err != nil {
-		return nil, gocql.ConvertError("GetReplicationTask", err)
-	}
-
-	return &p.InternalGetReplicationTaskResponse{Task: *p.NewDataBlob(data, encoding)}, nil
-}
-
-func (d *MutableStateTaskStore) GetReplicationTasks(
-	request *p.GetReplicationTasksRequest,
-) (*p.InternalGetReplicationTasksResponse, error) {
+func (d *MutableStateTaskStore) getReplicationTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
 
 	// Reading replication tasks need to be quorum level consistent, otherwise we could lose task
 	query := d.Session.Query(templateGetReplicationTasksQuery,
@@ -631,15 +507,16 @@ func (d *MutableStateTaskStore) GetReplicationTasks(
 		rowTypeReplicationWorkflowID,
 		rowTypeReplicationRunID,
 		defaultVisibilityTimestamp,
-		request.MinTaskID,
-		request.MaxTaskID,
-	).PageSize(request.BatchSize).PageState(request.NextPageToken)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx).PageSize(request.BatchSize).PageState(request.NextPageToken)
 
 	return d.populateGetReplicationTasksResponse(query, "GetReplicationTasks")
 }
 
-func (d *MutableStateTaskStore) CompleteReplicationTask(
-	request *p.CompleteReplicationTaskRequest,
+func (d *MutableStateTaskStore) completeReplicationTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
 	query := d.Session.Query(templateCompleteReplicationTaskQuery,
 		request.ShardID,
@@ -648,30 +525,34 @@ func (d *MutableStateTaskStore) CompleteReplicationTask(
 		rowTypeReplicationWorkflowID,
 		rowTypeReplicationRunID,
 		defaultVisibilityTimestamp,
-		request.TaskID)
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("CompleteReplicationTask", err)
 }
 
-func (d *MutableStateTaskStore) RangeCompleteReplicationTask(
-	request *p.RangeCompleteReplicationTaskRequest,
+func (d *MutableStateTaskStore) rangeCompleteReplicationTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
-	query := d.Session.Query(templateCompleteReplicationTaskBeforeQuery,
+	query := d.Session.Query(templateRangeCompleteReplicationTaskQuery,
 		request.ShardID,
 		rowTypeReplicationTask,
 		rowTypeReplicationNamespaceID,
 		rowTypeReplicationWorkflowID,
 		rowTypeReplicationRunID,
 		defaultVisibilityTimestamp,
-		request.InclusiveEndTaskID,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("RangeCompleteReplicationTask", err)
 }
 
 func (d *MutableStateTaskStore) PutReplicationTaskToDLQ(
+	ctx context.Context,
 	request *p.PutReplicationTaskToDLQRequest,
 ) error {
 	task := request.TaskInfo
@@ -690,7 +571,8 @@ func (d *MutableStateTaskStore) PutReplicationTaskToDLQ(
 		datablob.Data,
 		datablob.EncodingType.String(),
 		defaultVisibilityTimestamp,
-		task.GetTaskId())
+		task.GetTaskId(),
+	).WithContext(ctx)
 
 	err = query.Exec()
 	if err != nil {
@@ -701,8 +583,9 @@ func (d *MutableStateTaskStore) PutReplicationTaskToDLQ(
 }
 
 func (d *MutableStateTaskStore) GetReplicationTasksFromDLQ(
+	ctx context.Context,
 	request *p.GetReplicationTasksFromDLQRequest,
-) (*p.InternalGetReplicationTasksResponse, error) {
+) (*p.InternalGetHistoryTasksResponse, error) {
 	// Reading replication tasks need to be quorum level consistent, otherwise we could lose tasks
 	query := d.Session.Query(templateGetReplicationTasksQuery,
 		request.ShardID,
@@ -711,14 +594,15 @@ func (d *MutableStateTaskStore) GetReplicationTasksFromDLQ(
 		request.SourceClusterName,
 		rowTypeDLQRunID,
 		defaultVisibilityTimestamp,
-		request.MinTaskID,
-		request.MinTaskID+int64(request.BatchSize),
-	).PageSize(request.BatchSize).PageState(request.NextPageToken)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx).PageSize(request.BatchSize).PageState(request.NextPageToken)
 
 	return d.populateGetReplicationTasksResponse(query, "GetReplicationTasksFromDLQ")
 }
 
 func (d *MutableStateTaskStore) DeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *p.DeleteReplicationTaskFromDLQRequest,
 ) error {
 
@@ -729,14 +613,15 @@ func (d *MutableStateTaskStore) DeleteReplicationTaskFromDLQ(
 		request.SourceClusterName,
 		rowTypeDLQRunID,
 		defaultVisibilityTimestamp,
-		request.TaskID,
-	)
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("DeleteReplicationTaskFromDLQ", err)
 }
 
 func (d *MutableStateTaskStore) RangeDeleteReplicationTaskFromDLQ(
+	ctx context.Context,
 	request *p.RangeDeleteReplicationTaskFromDLQRequest,
 ) error {
 
@@ -747,39 +632,42 @@ func (d *MutableStateTaskStore) RangeDeleteReplicationTaskFromDLQ(
 		request.SourceClusterName,
 		rowTypeDLQRunID,
 		defaultVisibilityTimestamp,
-		request.ExclusiveBeginTaskID,
-		request.InclusiveEndTaskID,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("RangeDeleteReplicationTaskFromDLQ", err)
 }
 
-func (d *MutableStateTaskStore) GetVisibilityTask(
-	request *p.GetVisibilityTaskRequest,
-) (*p.InternalGetVisibilityTaskResponse, error) {
-	shardID := request.ShardID
-	taskID := request.TaskID
-	query := d.Session.Query(templateGetVisibilityTaskQuery,
-		shardID,
-		rowTypeVisibilityTask,
-		rowTypeVisibilityTaskNamespaceID,
-		rowTypeVisibilityTaskWorkflowID,
-		rowTypeVisibilityTaskRunID,
-		defaultVisibilityTimestamp,
-		taskID)
+func (d *MutableStateTaskStore) IsReplicationDLQEmpty(
+	ctx context.Context,
+	request *p.GetReplicationTasksFromDLQRequest,
+) (bool, error) {
 
-	var data []byte
-	var encoding string
-	if err := query.Scan(&data, &encoding); err != nil {
-		return nil, gocql.ConvertError("GetVisibilityTask", err)
+	query := d.Session.Query(templateIsQueueEmptyQuery,
+		request.ShardID,
+		rowTypeDLQ,
+		rowTypeDLQNamespaceID,
+		request.SourceClusterName,
+		rowTypeDLQRunID,
+		defaultVisibilityTimestamp,
+		request.InclusiveMinTaskKey.TaskID,
+	).WithContext(ctx)
+
+	if err := query.Scan(nil); err != nil {
+		if gocql.IsNotFoundError(err) {
+			return true, nil
+		}
+		return true, gocql.ConvertError("IsReplicationDLQEmpty", err)
 	}
-	return &p.InternalGetVisibilityTaskResponse{Task: *p.NewDataBlob(data, encoding)}, nil
+	return false, nil
 }
 
-func (d *MutableStateTaskStore) GetVisibilityTasks(
-	request *p.GetVisibilityTasksRequest,
-) (*p.InternalGetVisibilityTasksResponse, error) {
+func (d *MutableStateTaskStore) getVisibilityTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
 
 	// Reading Visibility tasks need to be quorum level consistent, otherwise we could lose task
 	query := d.Session.Query(templateGetVisibilityTasksQuery,
@@ -789,18 +677,23 @@ func (d *MutableStateTaskStore) GetVisibilityTasks(
 		rowTypeVisibilityTaskWorkflowID,
 		rowTypeVisibilityTaskRunID,
 		defaultVisibilityTimestamp,
-		request.ReadLevel,
-		request.MaxReadLevel,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
 
-	response := &p.InternalGetVisibilityTasksResponse{}
+	response := &p.InternalGetHistoryTasksResponse{}
+	var taskID int64
 	var data []byte
 	var encoding string
 
-	for iter.Scan(&data, &encoding) {
-		response.Tasks = append(response.Tasks, *p.NewDataBlob(data, encoding))
+	for iter.Scan(&taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
 
+		taskID = 0
 		data = nil
 		encoding = ""
 	}
@@ -815,8 +708,9 @@ func (d *MutableStateTaskStore) GetVisibilityTasks(
 	return response, nil
 }
 
-func (d *MutableStateTaskStore) CompleteVisibilityTask(
-	request *p.CompleteVisibilityTaskRequest,
+func (d *MutableStateTaskStore) completeVisibilityTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
 ) error {
 	query := d.Session.Query(templateCompleteVisibilityTaskQuery,
 		request.ShardID,
@@ -825,14 +719,16 @@ func (d *MutableStateTaskStore) CompleteVisibilityTask(
 		rowTypeVisibilityTaskWorkflowID,
 		rowTypeVisibilityTaskRunID,
 		defaultVisibilityTimestamp,
-		request.TaskID)
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("CompleteVisibilityTask", err)
 }
 
-func (d *MutableStateTaskStore) RangeCompleteVisibilityTask(
-	request *p.RangeCompleteVisibilityTaskRequest,
+func (d *MutableStateTaskStore) rangeCompleteVisibilityTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
 ) error {
 	query := d.Session.Query(templateRangeCompleteVisibilityTaskQuery,
 		request.ShardID,
@@ -841,121 +737,32 @@ func (d *MutableStateTaskStore) RangeCompleteVisibilityTask(
 		rowTypeVisibilityTaskWorkflowID,
 		rowTypeVisibilityTaskRunID,
 		defaultVisibilityTimestamp,
-		request.ExclusiveBeginTaskID,
-		request.InclusiveEndTaskID,
-	)
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
 
 	err := query.Exec()
 	return gocql.ConvertError("RangeCompleteVisibilityTask", err)
 }
 
-func (d *MutableStateTaskStore) GetTieredStorageTask(
-	request *p.GetTieredStorageTaskRequest,
-) (*p.InternalGetTieredStorageTaskResponse, error) {
-	shardID := request.ShardID
-	taskID := request.TaskID
-	query := d.Session.Query(templateGetTieredStorageTaskQuery,
-		shardID,
-		rowTypeTieredStorageTask,
-		rowTypeTieredStorageTaskNamespaceID,
-		rowTypeTieredStorageTaskWorkflowID,
-		rowTypeTieredStorageTaskRunID,
-		defaultTieredStorageTimestamp,
-		taskID)
-
-	var data []byte
-	var encoding string
-	if err := query.Scan(&data, &encoding); err != nil {
-		return nil, gocql.ConvertError("GetTieredStorageTask", err)
-	}
-	return &p.InternalGetTieredStorageTaskResponse{Task: *p.NewDataBlob(data, encoding)}, nil
-}
-
-func (d *MutableStateTaskStore) GetTieredStorageTasks(
-	request *p.GetTieredStorageTasksRequest,
-) (*p.InternalGetTieredStorageTasksResponse, error) {
-
-	// Reading TieredStorage tasks need to be quorum level consistent, otherwise we could lose task
-	query := d.Session.Query(templateGetTieredStorageTasksQuery,
-		request.ShardID,
-		rowTypeTieredStorageTask,
-		rowTypeTieredStorageTaskNamespaceID,
-		rowTypeTieredStorageTaskWorkflowID,
-		rowTypeTieredStorageTaskRunID,
-		defaultTieredStorageTimestamp,
-		request.MinTaskID,
-		request.MaxTaskID,
-	)
-	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
-
-	response := &p.InternalGetTieredStorageTasksResponse{}
-	var data []byte
-	var encoding string
-
-	for iter.Scan(&data, &encoding) {
-		response.Tasks = append(response.Tasks, *p.NewDataBlob(data, encoding))
-
-		data = nil
-		encoding = ""
-	}
-	if len(iter.PageState()) > 0 {
-		response.NextPageToken = iter.PageState()
-	}
-
-	if err := iter.Close(); err != nil {
-		return nil, gocql.ConvertError("GetTieredStorageTasks", err)
-	}
-
-	return response, nil
-}
-
-func (d *MutableStateTaskStore) CompleteTieredStorageTask(
-	request *p.CompleteTieredStorageTaskRequest,
-) error {
-	query := d.Session.Query(templateCompleteTieredStorageTaskQuery,
-		request.ShardID,
-		rowTypeTieredStorageTask,
-		rowTypeTieredStorageTaskNamespaceID,
-		rowTypeTieredStorageTaskWorkflowID,
-		rowTypeTieredStorageTaskRunID,
-		defaultTieredStorageTimestamp,
-		request.TaskID)
-
-	err := query.Exec()
-	return gocql.ConvertError("CompleteTieredStorageTask", err)
-}
-
-func (d *MutableStateTaskStore) RangeCompleteTieredStorageTask(
-	request *p.RangeCompleteTieredStorageTaskRequest,
-) error {
-	query := d.Session.Query(templateRangeCompleteTieredStorageTaskQuery,
-		request.ShardID,
-		rowTypeTieredStorageTask,
-		rowTypeTieredStorageTaskNamespaceID,
-		rowTypeTieredStorageTaskWorkflowID,
-		rowTypeTieredStorageTaskRunID,
-		defaultTieredStorageTimestamp,
-		request.ExclusiveBeginTaskID,
-		request.InclusiveEndTaskID,
-	)
-
-	err := query.Exec()
-	return gocql.ConvertError("RangeCompleteTieredStorageTask", err)
-}
-
 func (d *MutableStateTaskStore) populateGetReplicationTasksResponse(
 	query gocql.Query,
 	operation string,
-) (*p.InternalGetReplicationTasksResponse, error) {
+) (*p.InternalGetHistoryTasksResponse, error) {
 	iter := query.Iter()
 
-	response := &p.InternalGetReplicationTasksResponse{}
+	response := &p.InternalGetHistoryTasksResponse{}
+	var taskID int64
 	var data []byte
 	var encoding string
 
-	for iter.Scan(&data, &encoding) {
-		response.Tasks = append(response.Tasks, *p.NewDataBlob(data, encoding))
+	for iter.Scan(&taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
 
+		taskID = 0
 		data = nil
 		encoding = ""
 	}
@@ -968,4 +775,170 @@ func (d *MutableStateTaskStore) populateGetReplicationTasksResponse(
 	}
 
 	return response, nil
+}
+
+func (d *MutableStateTaskStore) getHistoryTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	switch request.TaskCategory.Type() {
+	case tasks.CategoryTypeImmediate:
+		return d.getHistoryImmedidateTasks(ctx, request)
+	case tasks.CategoryTypeScheduled:
+		return d.getHistoryScheduledTasks(ctx, request)
+	default:
+		panic(fmt.Sprintf("Unknown task category type: %v", request.TaskCategory.Type().String()))
+	}
+}
+
+func (d *MutableStateTaskStore) getHistoryImmedidateTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	// execution manager should already validated the request
+	// Reading history tasks need to be quorum level consistent, otherwise we could lose task
+
+	query := d.Session.Query(templateGetHistoryImmediateTasksQuery,
+		request.ShardID,
+		request.TaskCategory.ID(),
+		rowTypeHistoryTaskNamespaceID,
+		rowTypeHistoryTaskWorkflowID,
+		rowTypeHistoryTaskRunID,
+		defaultVisibilityTimestamp,
+		request.InclusiveMinTaskKey.TaskID,
+		request.ExclusiveMaxTaskKey.TaskID,
+	).WithContext(ctx)
+
+	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
+
+	response := &p.InternalGetHistoryTasksResponse{}
+	var taskID int64
+	var data []byte
+	var encoding string
+
+	for iter.Scan(&taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewImmediateKey(taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
+
+		taskID = 0
+		data = nil
+		encoding = ""
+	}
+	if len(iter.PageState()) > 0 {
+		response.NextPageToken = iter.PageState()
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, gocql.ConvertError("GetHistoryImmediateTasks", err)
+	}
+
+	return response, nil
+}
+
+func (d *MutableStateTaskStore) getHistoryScheduledTasks(
+	ctx context.Context,
+	request *p.GetHistoryTasksRequest,
+) (*p.InternalGetHistoryTasksResponse, error) {
+	// execution manager should already validated the request
+	// Reading history tasks need to be quorum level consistent, otherwise we could lose task
+
+	minTimestamp := p.UnixMilliseconds(request.InclusiveMinTaskKey.FireTime)
+	maxTimestamp := p.UnixMilliseconds(request.ExclusiveMaxTaskKey.FireTime)
+	query := d.Session.Query(templateGetHistoryScheduledTasksQuery,
+		request.ShardID,
+		request.TaskCategory.ID(),
+		rowTypeHistoryTaskNamespaceID,
+		rowTypeHistoryTaskWorkflowID,
+		rowTypeHistoryTaskRunID,
+		minTimestamp,
+		maxTimestamp,
+	).WithContext(ctx)
+
+	iter := query.PageSize(request.BatchSize).PageState(request.NextPageToken).Iter()
+
+	response := &p.InternalGetHistoryTasksResponse{}
+	var timestamp time.Time
+	var taskID int64
+	var data []byte
+	var encoding string
+
+	for iter.Scan(&timestamp, &taskID, &data, &encoding) {
+		response.Tasks = append(response.Tasks, p.InternalHistoryTask{
+			Key:  tasks.NewKey(timestamp, taskID),
+			Blob: *p.NewDataBlob(data, encoding),
+		})
+
+		timestamp = time.Time{}
+		taskID = 0
+		data = nil
+		encoding = ""
+	}
+	if len(iter.PageState()) > 0 {
+		response.NextPageToken = iter.PageState()
+	}
+
+	if err := iter.Close(); err != nil {
+		return nil, gocql.ConvertError("GetHistoryScheduledTasks", err)
+	}
+
+	return response, nil
+}
+
+func (d *MutableStateTaskStore) completeHistoryTask(
+	ctx context.Context,
+	request *p.CompleteHistoryTaskRequest,
+) error {
+	ts := defaultVisibilityTimestamp
+	if request.TaskCategory.Type() == tasks.CategoryTypeScheduled {
+		ts = p.UnixMilliseconds(request.TaskKey.FireTime)
+	}
+	query := d.Session.Query(templateCompleteHistoryTaskQuery,
+		request.ShardID,
+		request.TaskCategory.ID(),
+		rowTypeHistoryTaskNamespaceID,
+		rowTypeHistoryTaskWorkflowID,
+		rowTypeHistoryTaskRunID,
+		ts,
+		request.TaskKey.TaskID,
+	).WithContext(ctx)
+
+	err := query.Exec()
+	return gocql.ConvertError("CompleteHistoryTask", err)
+}
+
+func (d *MutableStateTaskStore) rangeCompleteHistoryTasks(
+	ctx context.Context,
+	request *p.RangeCompleteHistoryTasksRequest,
+) error {
+	// execution manager should already validated the request
+	var query gocql.Query
+	if request.TaskCategory.Type() == tasks.CategoryTypeImmediate {
+		query = d.Session.Query(templateRangeCompleteHistoryImmediateTasksQuery,
+			request.ShardID,
+			request.TaskCategory.ID(),
+			rowTypeHistoryTaskNamespaceID,
+			rowTypeHistoryTaskWorkflowID,
+			rowTypeHistoryTaskRunID,
+			defaultVisibilityTimestamp,
+			request.InclusiveMinTaskKey.TaskID,
+			request.ExclusiveMaxTaskKey.TaskID,
+		).WithContext(ctx)
+	} else {
+		minTimestamp := p.UnixMilliseconds(request.InclusiveMinTaskKey.FireTime)
+		maxTimestamp := p.UnixMilliseconds(request.ExclusiveMaxTaskKey.FireTime)
+		query = d.Session.Query(templateRangeCompleteHistoryScheduledTasksQuery,
+			request.ShardID,
+			request.TaskCategory.ID(),
+			rowTypeHistoryTaskNamespaceID,
+			rowTypeHistoryTaskWorkflowID,
+			rowTypeHistoryTaskRunID,
+			minTimestamp,
+			maxTimestamp,
+		).WithContext(ctx)
+	}
+
+	err := query.Exec()
+	return gocql.ConvertError("RangeCompleteHistoryTasks", err)
 }

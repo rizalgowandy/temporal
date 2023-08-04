@@ -40,19 +40,7 @@ import (
 	"go.temporal.io/server/service/worker/scanner/taskqueue"
 )
 
-type (
-	contextKey int
-
-	scannerCtxExecMgrFactory struct {
-		ctx scannerContext
-	}
-)
-
-func (s scannerCtxExecMgrFactory) Close() {}
-
 const (
-	scannerContextKey = contextKey(0)
-
 	infiniteDuration = 20 * 365 * 24 * time.Hour
 
 	tqScannerWFID                  = "temporal-sys-tq-scanner"
@@ -71,7 +59,12 @@ const (
 	executionsScavengerActivityName = "temporal-sys-executions-scanner-scvg-activity"
 )
 
+type (
+	scannerContextKeyType struct{}
+)
+
 var (
+	scannerContextKey             = scannerContextKeyType{}
 	tlScavengerHBInterval         = 10 * time.Second
 	executionsScavengerHBInterval = 10 * time.Second
 
@@ -157,8 +150,13 @@ func HistoryScavengerActivity(
 		ctx.executionManager,
 		rps,
 		ctx.historyClient,
+		ctx.adminClient,
+		ctx.namespaceRegistry,
 		hbd,
-		ctx.metricsClient,
+		ctx.cfg.HistoryScannerDataMinAge,
+		ctx.cfg.ExecutionDataDurationBuffer,
+		ctx.cfg.HistoryScannerVerifyRetention,
+		ctx.metricsHandler,
 		ctx.logger,
 	)
 	return scavenger.Run(activityCtx)
@@ -169,7 +167,7 @@ func TaskQueueScavengerActivity(
 	activityCtx context.Context,
 ) error {
 	ctx := activityCtx.Value(scannerContextKey).(scannerContext)
-	scavenger := taskqueue.NewScavenger(ctx.taskManager, ctx.metricsClient, ctx.logger)
+	scavenger := taskqueue.NewScavenger(ctx.taskManager, ctx.metricsHandler, ctx.logger)
 	ctx.logger.Info("Starting task queue scavenger")
 	scavenger.Start()
 	for scavenger.Alive() {
@@ -190,11 +188,20 @@ func ExecutionsScavengerActivity(
 ) error {
 	ctx := activityCtx.Value(scannerContextKey).(scannerContext)
 
-	metricsClient := ctx.metricsClient
+	metricsHandler := ctx.metricsHandler
 	scavenger := executions.NewScavenger(
+		activityCtx,
 		ctx.cfg.Persistence.NumHistoryShards,
+		ctx.cfg.ExecutionScannerPerHostQPS,
+		ctx.cfg.ExecutionScannerPerShardQPS,
+		ctx.cfg.ExecutionDataDurationBuffer,
+		ctx.cfg.ExecutionScannerWorkerCount,
+		ctx.cfg.ExecutionScannerHistoryEventIdValidator,
 		ctx.executionManager,
-		metricsClient,
+		ctx.namespaceRegistry,
+		ctx.historyClient,
+		ctx.adminClient,
+		metricsHandler,
 		ctx.logger,
 	)
 	scavenger.Start()

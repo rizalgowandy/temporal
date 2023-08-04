@@ -68,7 +68,7 @@ func (s *notifierSuite) SetupTest() {
 
 	s.notifier = NewNotifier(
 		clock.NewRealTimeSource(),
-		metrics.NewNoopMetricsClient(),
+		metrics.NoopMetricsHandler,
 		func(namespaceID namespace.ID, workflowID string) int32 {
 			key := namespaceID.String() + "_" + workflowID
 			return int32(len(key))
@@ -105,10 +105,8 @@ func (s *notifierSuite) TestSingleSubscriberWatchingEvents() {
 		s.notifier.NotifyNewHistoryEvent(historyEvent)
 	}()
 
-	select {
-	case msg := <-channel:
-		s.Equal(historyEvent, msg)
-	}
+	msg := <-channel
+	s.Equal(historyEvent, msg)
 
 	err = s.notifier.UnwatchHistoryEvent(definition.NewWorkflowKey(namespaceID, execution.GetWorkflowId(), execution.GetRunId()), subscriberID)
 	s.Nil(err)

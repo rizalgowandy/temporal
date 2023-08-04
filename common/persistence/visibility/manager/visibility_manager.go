@@ -25,14 +25,16 @@
 package manager
 
 // -aux_files is required here due to Closeable interface being in another file.
-//go:generate mockgen -copyright_file ../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination visibility_manager_mock.go -aux_files go.temporal.io/server/common/persistence=../../dataInterfaces.go
+//go:generate mockgen -copyright_file ../../../../LICENSE -package $GOPACKAGE -source $GOFILE -destination visibility_manager_mock.go -aux_files go.temporal.io/server/common/persistence=../../data_interfaces.go
 
 import (
+	"context"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
+	"go.temporal.io/api/workflowservice/v1"
 
 	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/persistence"
@@ -42,25 +44,30 @@ type (
 	// VisibilityManager is used to manage the visibility store
 	VisibilityManager interface {
 		persistence.Closeable
-		GetName() string
+		GetReadStoreName(nsName namespace.Name) string
+		GetStoreNames() []string
+		HasStoreName(stName string) bool
+		GetIndexName() string
+		ValidateCustomSearchAttributes(searchAttributes map[string]any) (map[string]any, error)
 
 		// Write APIs.
-		RecordWorkflowExecutionStarted(request *RecordWorkflowExecutionStartedRequest) error
-		RecordWorkflowExecutionClosed(request *RecordWorkflowExecutionClosedRequest) error
-		UpsertWorkflowExecution(request *UpsertWorkflowExecutionRequest) error
-		DeleteWorkflowExecution(request *VisibilityDeleteWorkflowExecutionRequest) error
+		RecordWorkflowExecutionStarted(ctx context.Context, request *RecordWorkflowExecutionStartedRequest) error
+		RecordWorkflowExecutionClosed(ctx context.Context, request *RecordWorkflowExecutionClosedRequest) error
+		UpsertWorkflowExecution(ctx context.Context, request *UpsertWorkflowExecutionRequest) error
+		DeleteWorkflowExecution(ctx context.Context, request *VisibilityDeleteWorkflowExecutionRequest) error
 
 		// Read APIs.
-		ListOpenWorkflowExecutions(request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutions(request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error)
-		ListOpenWorkflowExecutionsByType(request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByType(request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error)
-		ListOpenWorkflowExecutionsByWorkflowID(request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByWorkflowID(request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error)
-		ListClosedWorkflowExecutionsByStatus(request *ListClosedWorkflowExecutionsByStatusRequest) (*ListWorkflowExecutionsResponse, error)
-		ListWorkflowExecutions(request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error)
-		ScanWorkflowExecutions(request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error)
-		CountWorkflowExecutions(request *CountWorkflowExecutionsRequest) (*CountWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequest) (*ListWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutionsByType(ctx context.Context, request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByType(ctx context.Context, request *ListWorkflowExecutionsByTypeRequest) (*ListWorkflowExecutionsResponse, error)
+		ListOpenWorkflowExecutionsByWorkflowID(ctx context.Context, request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByWorkflowID(ctx context.Context, request *ListWorkflowExecutionsByWorkflowIDRequest) (*ListWorkflowExecutionsResponse, error)
+		ListClosedWorkflowExecutionsByStatus(ctx context.Context, request *ListClosedWorkflowExecutionsByStatusRequest) (*ListWorkflowExecutionsResponse, error)
+		ListWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error)
+		ScanWorkflowExecutions(ctx context.Context, request *ListWorkflowExecutionsRequestV2) (*ListWorkflowExecutionsResponse, error)
+		CountWorkflowExecutions(ctx context.Context, request *CountWorkflowExecutionsRequest) (*CountWorkflowExecutionsResponse, error)
+		GetWorkflowExecution(ctx context.Context, request *GetWorkflowExecutionRequest) (*GetWorkflowExecutionResponse, error)
 	}
 
 	VisibilityRequestBase struct {
@@ -87,9 +94,9 @@ type (
 	// RecordWorkflowExecutionClosedRequest is used to add a record of a closed execution
 	RecordWorkflowExecutionClosedRequest struct {
 		*VisibilityRequestBase
-		CloseTime     time.Time
-		HistoryLength int64
-		Retention     *time.Duration // not persisted, used for cassandra ttl
+		CloseTime        time.Time
+		HistoryLength    int64
+		HistorySizeBytes int64
 	}
 
 	// UpsertWorkflowExecutionRequest is used to upsert workflow execution
@@ -101,6 +108,7 @@ type (
 	ListWorkflowExecutionsRequest struct {
 		NamespaceID       namespace.ID
 		Namespace         namespace.Name // namespace.Name is not persisted.
+		NamespaceDivision string
 		EarliestStartTime time.Time
 		LatestStartTime   time.Time
 		// Maximum number of workflow executions per page
@@ -138,7 +146,8 @@ type (
 
 	// CountWorkflowExecutionsResponse is response to CountWorkflowExecutions
 	CountWorkflowExecutionsResponse struct {
-		Count int64
+		Count  int64 // sum of counts in Groups
+		Groups []*workflowservice.CountWorkflowExecutionsResponse_AggregationGroup
 	}
 
 	// ListWorkflowExecutionsByTypeRequest is used to list executions of
@@ -168,5 +177,36 @@ type (
 		RunID       string
 		WorkflowID  string
 		TaskID      int64
+		StartTime   *time.Time // if start time is not empty, delete record from open_execution for cassandra db
+		CloseTime   *time.Time // if end time is not empty, delete record from closed_execution for cassandra db
+	}
+
+	// GetWorkflowExecutionRequest is request from GetWorkflowExecution
+	GetWorkflowExecutionRequest struct {
+		NamespaceID namespace.ID
+		Namespace   namespace.Name // namespace.Name is not persisted
+		RunID       string
+		WorkflowID  string
+		StartTime   *time.Time // if start time is not empty, search record from open_execution for cassandra db
+		CloseTime   *time.Time // if end time is not empty, search record from closed_execution for cassandra db
+	}
+
+	// GetWorkflowExecutionResponse is response to GetWorkflowExecution
+	GetWorkflowExecutionResponse struct {
+		Execution *workflowpb.WorkflowExecutionInfo
 	}
 )
+
+func (r *ListWorkflowExecutionsRequest) OverrideToken(token []byte) {
+	r.NextPageToken = token
+}
+
+func (r *ListWorkflowExecutionsRequest) GetToken() []byte {
+	return r.NextPageToken
+}
+func (r *ListWorkflowExecutionsRequest) OverridePageSize(pageSize int) {
+	r.PageSize = pageSize
+}
+func (r *ListWorkflowExecutionsRequest) GetPageSize() int {
+	return r.PageSize
+}

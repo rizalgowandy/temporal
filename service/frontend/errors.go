@@ -47,6 +47,7 @@ var (
 	errQueryDisallowedForNamespace                        = serviceerror.NewInvalidArgument("Namespace is not allowed to query, please contact temporal team to re-enable queries.")
 	errClusterNameNotSet                                  = serviceerror.NewInvalidArgument("Cluster name is not set.")
 	errEmptyReplicationInfo                               = serviceerror.NewInvalidArgument("Replication task info is not set.")
+	errTaskRangeNotSet                                    = serviceerror.NewInvalidArgument("Task range is not set")
 	errHistoryNotFound                                    = serviceerror.NewInvalidArgument("Requested workflow history not found, may have passed retention period.")
 	errNamespaceTooLong                                   = serviceerror.NewInvalidArgument("Namespace length exceeds limit.")
 	errWorkflowTypeTooLong                                = serviceerror.NewInvalidArgument("WorkflowType length exceeds limit.")
@@ -55,6 +56,7 @@ var (
 	errTaskQueueTooLong                                   = serviceerror.NewInvalidArgument("TaskQueue length exceeds limit.")
 	errRequestIDTooLong                                   = serviceerror.NewInvalidArgument("RequestId length exceeds limit.")
 	errIdentityTooLong                                    = serviceerror.NewInvalidArgument("Identity length exceeds limit.")
+	errNotesTooLong                                       = serviceerror.NewInvalidArgument("Schedule notes exceeds limit.")
 	errEarliestTimeIsGreaterThanLatestTime                = serviceerror.NewInvalidArgument("EarliestTime in StartTimeFilter should not be larger than LatestTime.")
 	errClusterIsNotConfiguredForVisibilityArchival        = serviceerror.NewInvalidArgument("Cluster is not configured for visibility archival.")
 	errClusterIsNotConfiguredForReadingArchivalVisibility = serviceerror.NewInvalidArgument("Cluster is not configured for reading archived visibility records.")
@@ -63,14 +65,31 @@ var (
 	errInvalidPageSize                                    = serviceerror.NewInvalidArgument("Invalid PageSize.")
 	errInvalidPaginationToken                             = serviceerror.NewInvalidArgument("Invalid pagination token.")
 	errInvalidFirstNextEventCombination                   = serviceerror.NewInvalidArgument("Invalid FirstEventId and NextEventId combination.")
-	errInvalidStartEventCombination                       = serviceerror.NewInvalidArgument("Invalid StartEventId and StartEventVersion combination.")
-	errInvalidEndEventCombination                         = serviceerror.NewInvalidArgument("Invalid EndEventId and EndEventVersion combination.")
 	errInvalidVersionHistories                            = serviceerror.NewInvalidArgument("Invalid version histories.")
 	errInvalidEventQueryRange                             = serviceerror.NewInvalidArgument("Invalid event query range.")
 	errDLQTypeIsNotSupported                              = serviceerror.NewInvalidArgument("The DLQ type is not supported.")
 	errFailureMustHaveApplicationFailureInfo              = serviceerror.NewInvalidArgument("Failure must have ApplicationFailureInfo.")
 	errStatusFilterMustBeNotRunning                       = serviceerror.NewInvalidArgument("StatusFilter must be specified and must be not Running.")
-	errShuttingDown                                       = serviceerror.NewUnavailable("Shutting down")
+	errCronNotAllowed                                     = serviceerror.NewInvalidArgument("Scheduled workflow must not contain CronSchedule")
+	errIDReusePolicyNotAllowed                            = serviceerror.NewInvalidArgument("Scheduled workflow must not contain WorkflowIDReusePolicy")
+	errUnableDeleteSystemNamespace                        = serviceerror.NewInvalidArgument("Unable to delete system namespace.")
+	errBatchJobIDNotSet                                   = serviceerror.NewInvalidArgument("JobId is not set on request.")
+	errNamespaceNotSet                                    = serviceerror.NewInvalidArgument("Namespace is not set on request.")
+	errReasonNotSet                                       = serviceerror.NewInvalidArgument("Reason is not set on request.")
+	errBatchOperationNotSet                               = serviceerror.NewInvalidArgument("Batch operation is not set on request.")
+	errCronAndStartDelaySet                               = serviceerror.NewInvalidArgument("CronSchedule and WorkflowStartDelay may not be used together.")
+	errInvalidWorkflowStartDelaySeconds                   = serviceerror.NewInvalidArgument("An invalid WorkflowStartDelaySeconds is set on request.")
+	errRaceConditionAddingSearchAttributes                = serviceerror.NewUnavailable("Generated search attributes mapping unavailble.")
+	errUseVersioningWithoutBuildId                        = serviceerror.NewInvalidArgument("WorkerVersionStamp must be present if UseVersioning is true.")
+	errUseVersioningWithoutNormalName                     = serviceerror.NewInvalidArgument("NormalName must be set on sticky queue if UseVersioning is true.")
+	errBuildIdTooLong                                     = serviceerror.NewInvalidArgument("Build ID exceeds configured limit.workerBuildIdSize, use a shorter build ID.")
+
+	errUpdateMetaNotSet       = serviceerror.NewInvalidArgument("Update meta is not set on request.")
+	errUpdateInputNotSet      = serviceerror.NewInvalidArgument("Update input is not set on request.")
+	errUpdateNameNotSet       = serviceerror.NewInvalidArgument("Update name is not set on request.")
+	errUpdateIDTooLong        = serviceerror.NewInvalidArgument("UpdateId length exceeds limit.")
+	errUpdateRefNotSet        = serviceerror.NewInvalidArgument("UpdateRef is not set on request.")
+	errUpdateWaitPolicyNotSet = serviceerror.NewInvalidArgument("WaitPolicy is not set on request.")
 
 	errPageSizeTooBigMessage = "PageSize is larger than allowed %d."
 
@@ -83,6 +102,25 @@ var (
 	errUnableToSaveSearchAttributesMessage            = "Unable to save search attributes: %v."
 	errUnableToStartWorkflowMessage                   = "Unable to start %s workflow: %v."
 	errWorkflowReturnedErrorMessage                   = "Workflow %s returned an error: %v."
+	errUnableConnectRemoteClusterMessage              = "Unable connect to remote cluster %s with error: %v."
+	errInvalidRemoteClusterInfo                       = "Unable connect to remote cluster with invalid config: %v."
+	errUnableToStoreClusterInfo                       = "Unable to persist cluster info with error: %v."
+	errUnableToDeleteClusterInfo                      = "Unable to delete cluster info with error: %v."
+	errUnableToGetNamespaceInfoMessage                = "Unable to get namespace info with error: %v"
+	errUnableToCreateFrontendClientMessage            = "Unable to create frontend client with error: %v."
+	errTooManySearchAttributesMessage                 = "Unable to create search attributes: cannot have more than %d search attribute of type %s."
 
-	errNoPermission = serviceerror.NewPermissionDenied("No permission to do this operation.", "")
+	errListNotAllowed      = serviceerror.NewPermissionDenied("List is disabled on this namespace.", "")
+	errSchedulesNotAllowed = serviceerror.NewPermissionDenied("Schedules are disabled on this namespace.", "")
+
+	errBatchAPINotAllowed                = serviceerror.NewPermissionDenied("Batch operation feature are disabled on this namespace.", "")
+	errBatchOpsWorkflowFilterNotSet      = serviceerror.NewInvalidArgument("Workflow executions and visibility filter are not set on request.")
+	errBatchOpsWorkflowFiltersNotAllowed = serviceerror.NewInvalidArgument("Workflow executions and visibility filter are both set on request. Only one of them is allowed.")
+	errBatchOpsMaxWorkflowExecutionCount = serviceerror.NewInvalidArgument("Workflow executions count exceeded.")
+
+	errUpdateWorkflowExecutionAPINotAllowed           = serviceerror.NewPermissionDenied("UpdateWorkflowExecution operation is disabled on this namespace.", "")
+	errUpdateWorkflowExecutionAsyncAcceptedNotAllowed = serviceerror.NewPermissionDenied("UpdateWorkflowExecution issued asynchronously and waiting on update accepted is disabled on this namespace", "")
+	errUpdateWorkflowExecutionAsyncAdmittedNotAllowed = serviceerror.NewPermissionDenied("UpdateWorkflowExecution issued asynchronously and waiting on update admitted is disabled on this namespace", "")
+
+	errWorkerVersioningNotAllowed = serviceerror.NewPermissionDenied("Worker versioning is disabled on this namespace.", "")
 )

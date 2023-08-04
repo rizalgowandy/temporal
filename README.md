@@ -1,7 +1,10 @@
 [![Build status](https://badge.buildkite.com/98c157ed502d55722ef7f28e6470aa20702c76d6989a0a5a89.svg?branch=master)](https://buildkite.com/temporal/temporal-public)
 [![Coverage Status](https://coveralls.io/repos/github/temporalio/temporal/badge.svg?branch=master)](https://coveralls.io/github/temporalio/temporal?branch=master)
 [![Discourse](https://img.shields.io/static/v1?label=Discourse&message=Get%20Help&color=informational)](https://community.temporal.io)
-[![FOSSA Status](https://app.fossa.com/api/projects/custom%2B18405%2Fgithub.com%2Ftemporalio%2Ftemporal.svg?type=shield)](https://app.fossa.com/projects/custom%2B18405%2Fgithub.com%2Ftemporalio%2Ftemporal?ref=badge_shield)
+[![Go Report Card][go-report-image]][go-report-url]
+
+[go-report-image]: https://goreportcard.com/badge/github.com/temporalio/temporal
+[go-report-url]: https://goreportcard.com/report/github.com/temporalio/temporal
 
 # Temporal  
 
@@ -22,12 +25,11 @@ Learn more about Temporal at [docs.temporal.io](https://docs.temporal.io).
 Execute the following commands to start a pre-built image along with all the dependencies.
 
 ```bash
-git clone https://github.com/temporalio/docker-compose.git
-cd docker-compose
-docker-compose up
+brew install temporal
+temporal server start-dev
 ```
 
-Refer to Temporal [docker-compose](https://github.com/temporalio/docker-compose) repo for more advanced options.
+Refer to [Temporal CLI](https://docs.temporal.io/cli/#installation) documentation for more installation options.
 
 ### Run the Samples
 
@@ -36,21 +38,20 @@ We have a number of [HelloWorld type scenarios](https://github.com/temporalio/sa
 
 ### Use CLI
 
-Use [Temporal's command line tool](https://docs.temporal.io/docs/system-tools/tctl) `tctl` to interact with the local Temporal server.
+Use [Temporal CLI](https://docs.temporal.io/cli/) to interact with the running Temporal server.
 
 ```bash
-alias tctl="docker exec temporal-admin-tools tctl"
-tctl namespace list
-tctl workflow list
+temporal operator namespace list
+temporal workflow list
 ```
 
 ### Use Temporal Web UI
 
-Try [Temporal Web UI](https://github.com/temporalio/web) by opening [http://localhost:8088](http://localhost:8088) for viewing your sample workflows executing on Temporal.
+Try [Temporal Web UI](https://docs.temporal.io/web-ui) by opening [http://localhost:8233](http://localhost:8233) for viewing your sample workflows executing on Temporal.
 
 ## Repository
 
-This repository contains the source code of the Temporal server. To implement Workflows, Activities and Workers, use [Go SDK](https://github.com/temporalio/sdk-go) or [Java SDK](https://github.com/temporalio/sdk-java).
+This repository contains the source code of the Temporal server. To implement Workflows, Activities and Workers, use one of the [supported languages](https://docs.temporal.io/dev-guide/).
 
 ## Contributing
 
@@ -58,7 +59,7 @@ We'd love your help in making Temporal great. Please review our [contribution gu
 
 If you'd like to work on or propose a new feature, first peruse [feature requests](https://community.temporal.io/c/feature-requests/6) and our [proposals repo](https://github.com/temporalio/proposals) to discover existing active and accepted proposals.
 
-Feel free to join the Temporal [community](https://community.temporal.io) or [Slack channel](https://join.slack.com/t/temporalio/shared_invite/zt-onhti57l-J0bl~Tr7MqSUnIc1upjRkw) to start a discussion or check if a feature has already been discussed.
+Feel free to join the Temporal [community](https://community.temporal.io) or [Slack channel](https://temporalio.slack.com/join/shared_invite/zt-169fymtfr-ADaoVXop6fJ~xn2oAo8csg#/shared-invite/email) to start a discussion or check if a feature has already been discussed.
 Once you're sure the proposal is not covered elsewhere, please follow our [proposal instructions](https://github.com/temporalio/proposals#creating-a-new-proposal) or submit a [feature request](https://community.temporal.io/c/feature-requests/6).
 
 ## License

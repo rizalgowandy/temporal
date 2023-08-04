@@ -120,11 +120,11 @@ func (tbl *mockTaskTable) generate(count int, expired bool) {
 		exp := time.Now().UTC().Add(time.Hour)
 		ti := &persistencespb.AllocatedTaskInfo{
 			Data: &persistencespb.TaskInfo{
-				NamespaceId: tbl.namespaceID,
-				WorkflowId:  tbl.workflowID,
-				RunId:       tbl.runID,
-				ScheduleId:  3,
-				ExpiryTime:  &exp,
+				NamespaceId:      tbl.namespaceID,
+				WorkflowId:       tbl.workflowID,
+				RunId:            tbl.runID,
+				ScheduledEventId: 3,
+				ExpiryTime:       &exp,
 			},
 			TaskId: tbl.nextTaskID,
 		}
@@ -146,7 +146,7 @@ func (tbl *mockTaskTable) get(count int) []*persistencespb.AllocatedTaskInfo {
 func (tbl *mockTaskTable) deleteLessThan(id int64, limit int) int {
 	count := 0
 	for _, t := range tbl.tasks {
-		if t.GetTaskId() <= id && count < limit {
+		if t.GetTaskId() < id && count < limit {
 			count++
 			continue
 		}

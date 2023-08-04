@@ -32,17 +32,18 @@ import (
 	enumspb "go.temporal.io/api/enums/v1"
 
 	"go.temporal.io/server/common/namespace"
-	"go.temporal.io/server/common/persistence/visibility/store/elasticsearch/query"
+	"go.temporal.io/server/common/persistence/visibility/store/query"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/searchattribute"
 )
 
 type (
 	nameInterceptor struct {
-		namespace               namespace.Name
-		index                   string
-		searchAttributesTypeMap searchattribute.NameTypeMap
-		searchAttributesMapper  searchattribute.Mapper
+		namespace                      namespace.Name
+		index                          string
+		searchAttributesTypeMap        searchattribute.NameTypeMap
+		searchAttributesMapperProvider searchattribute.MapperProvider
+		seenNamespaceDivision          bool
 	}
 	valuesInterceptor struct{}
 )
@@ -51,38 +52,59 @@ func newNameInterceptor(
 	namespace namespace.Name,
 	index string,
 	saTypeMap searchattribute.NameTypeMap,
-	searchAttributesMapper searchattribute.Mapper,
+	searchAttributesMapperProvider searchattribute.MapperProvider,
 ) *nameInterceptor {
 	return &nameInterceptor{
-		namespace:               namespace,
-		index:                   index,
-		searchAttributesTypeMap: saTypeMap,
-		searchAttributesMapper:  searchAttributesMapper,
+		namespace:                      namespace,
+		index:                          index,
+		searchAttributesTypeMap:        saTypeMap,
+		searchAttributesMapperProvider: searchAttributesMapperProvider,
 	}
 }
 
-func newValuesInterceptor() *valuesInterceptor {
+func NewValuesInterceptor() *valuesInterceptor {
 	return &valuesInterceptor{}
 }
 
 func (ni *nameInterceptor) Name(name string, usage query.FieldNameUsage) (string, error) {
 	fieldName := name
-	if searchattribute.IsMappable(name) && ni.searchAttributesMapper != nil {
-		var err error
-		fieldName, err = ni.searchAttributesMapper.GetFieldName(name, ni.namespace.String())
+	if searchattribute.IsMappable(name) {
+		mapper, err := ni.searchAttributesMapperProvider.GetMapper(ni.namespace)
 		if err != nil {
 			return "", err
+		}
+		if mapper != nil {
+			fieldName, err = mapper.GetFieldName(name, ni.namespace.String())
+			if err != nil {
+				return "", err
+			}
 		}
 	}
 
 	fieldType, err := ni.searchAttributesTypeMap.GetType(fieldName)
 	if err != nil {
-		return "", query.NewConverterError(fmt.Sprintf("invalid search attribute: %s", name))
+		return "", query.NewConverterError("invalid search attribute: %s", name)
 	}
 
-	if usage == query.FieldNameSorter {
+	switch usage {
+	case query.FieldNameFilter:
+		if fieldName == searchattribute.TemporalNamespaceDivision {
+			ni.seenNamespaceDivision = true
+		}
+	case query.FieldNameSorter:
 		if fieldType == enumspb.INDEXED_VALUE_TYPE_TEXT {
-			return "", query.NewConverterError(fmt.Sprintf("unable to sort by field of %s type, use field of type %s", enumspb.INDEXED_VALUE_TYPE_TEXT.String(), enumspb.INDEXED_VALUE_TYPE_KEYWORD.String()))
+			return "", query.NewConverterError(
+				"unable to sort by field of %s type, use field of type %s",
+				enumspb.INDEXED_VALUE_TYPE_TEXT.String(),
+				enumspb.INDEXED_VALUE_TYPE_KEYWORD.String(),
+			)
+		}
+	case query.FieldNameGroupBy:
+		if fieldName != searchattribute.ExecutionStatus {
+			return "", query.NewConverterError(
+				"'group by' clause is only supported for %s search attribute",
+				searchattribute.ExecutionStatus,
+			)
 		}
 	}
 

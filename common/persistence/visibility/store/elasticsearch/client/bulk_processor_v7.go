@@ -25,34 +25,51 @@
 package client
 
 import (
+	"errors"
+	"time"
+
 	"github.com/olivere/elastic/v7"
 )
 
 type (
-	bulkProcessorV7 struct {
+	bulkProcessorImpl struct {
 		esBulkProcessor *elastic.BulkProcessor
 	}
 )
 
-func newBulkProcessorV7(esBulkProcessor *elastic.BulkProcessor) *bulkProcessorV7 {
+func newBulkProcessor(esBulkProcessor *elastic.BulkProcessor) *bulkProcessorImpl {
 	if esBulkProcessor == nil {
 		return nil
 	}
-	return &bulkProcessorV7{
+	return &bulkProcessorImpl{
 		esBulkProcessor: esBulkProcessor,
 	}
 }
 
-func (p *bulkProcessorV7) Stop() error {
-	errF := p.esBulkProcessor.Flush()
-	errS := p.esBulkProcessor.Stop()
-	if errF != nil {
-		return errF
+func (p *bulkProcessorImpl) Stop() error {
+	// Flush can block indefinitely if we can't reach ES. Call it with a timeout to avoid
+	// blocking server shutdown. Default fx app shutdown timeout is 15s, so use 5s.
+	errC := make(chan error)
+	go func() {
+		errF := p.esBulkProcessor.Flush()
+		errS := p.esBulkProcessor.Stop()
+		if errF != nil {
+			errC <- errF
+		} else {
+			errC <- errS
+		}
+	}()
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-errC:
+		return err
+	case <-timer.C:
+		return errors.New("esBulkProcessor Flush/Stop timed out")
 	}
-	return errS
 }
 
-func (p *bulkProcessorV7) Add(request *BulkableRequest) {
+func (p *bulkProcessorImpl) Add(request *BulkableRequest) {
 	switch request.RequestType {
 	case BulkableRequestTypeIndex:
 		bulkIndexRequest := elastic.NewBulkIndexRequest().

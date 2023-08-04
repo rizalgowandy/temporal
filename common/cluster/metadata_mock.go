@@ -32,6 +32,7 @@ import (
 	reflect "reflect"
 
 	gomock "github.com/golang/mock/gomock"
+	common "go.temporal.io/server/common"
 )
 
 // MockMetadata is a mock of Metadata interface.
@@ -58,17 +59,17 @@ func (m *MockMetadata) EXPECT() *MockMetadataMockRecorder {
 }
 
 // ClusterNameForFailoverVersion mocks base method.
-func (m *MockMetadata) ClusterNameForFailoverVersion(failoverVersion int64) string {
+func (m *MockMetadata) ClusterNameForFailoverVersion(isGlobalNamespace bool, failoverVersion int64) string {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "ClusterNameForFailoverVersion", failoverVersion)
+	ret := m.ctrl.Call(m, "ClusterNameForFailoverVersion", isGlobalNamespace, failoverVersion)
 	ret0, _ := ret[0].(string)
 	return ret0
 }
 
 // ClusterNameForFailoverVersion indicates an expected call of ClusterNameForFailoverVersion.
-func (mr *MockMetadataMockRecorder) ClusterNameForFailoverVersion(failoverVersion interface{}) *gomock.Call {
+func (mr *MockMetadataMockRecorder) ClusterNameForFailoverVersion(isGlobalNamespace, failoverVersion interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClusterNameForFailoverVersion", reflect.TypeOf((*MockMetadata)(nil).ClusterNameForFailoverVersion), failoverVersion)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ClusterNameForFailoverVersion", reflect.TypeOf((*MockMetadata)(nil).ClusterNameForFailoverVersion), isGlobalNamespace, failoverVersion)
 }
 
 // GetAllClusterInfo mocks base method.
@@ -83,6 +84,20 @@ func (m *MockMetadata) GetAllClusterInfo() map[string]ClusterInformation {
 func (mr *MockMetadataMockRecorder) GetAllClusterInfo() *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetAllClusterInfo", reflect.TypeOf((*MockMetadata)(nil).GetAllClusterInfo))
+}
+
+// GetClusterID mocks base method.
+func (m *MockMetadata) GetClusterID() int64 {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetClusterID")
+	ret0, _ := ret[0].(int64)
+	return ret0
+}
+
+// GetClusterID indicates an expected call of GetClusterID.
+func (mr *MockMetadataMockRecorder) GetClusterID() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetClusterID", reflect.TypeOf((*MockMetadata)(nil).GetClusterID))
 }
 
 // GetCurrentClusterName mocks base method.
@@ -141,6 +156,20 @@ func (mr *MockMetadataMockRecorder) GetNextFailoverVersion(arg0, arg1 interface{
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetNextFailoverVersion", reflect.TypeOf((*MockMetadata)(nil).GetNextFailoverVersion), arg0, arg1)
 }
 
+// GetPingChecks mocks base method.
+func (m *MockMetadata) GetPingChecks() []common.PingCheck {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetPingChecks")
+	ret0, _ := ret[0].([]common.PingCheck)
+	return ret0
+}
+
+// GetPingChecks indicates an expected call of GetPingChecks.
+func (mr *MockMetadataMockRecorder) GetPingChecks() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetPingChecks", reflect.TypeOf((*MockMetadata)(nil).GetPingChecks))
+}
+
 // IsGlobalNamespaceEnabled mocks base method.
 func (m *MockMetadata) IsGlobalNamespaceEnabled() bool {
 	m.ctrl.T.Helper()
@@ -181,4 +210,52 @@ func (m *MockMetadata) IsVersionFromSameCluster(version1, version2 int64) bool {
 func (mr *MockMetadataMockRecorder) IsVersionFromSameCluster(version1, version2 interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsVersionFromSameCluster", reflect.TypeOf((*MockMetadata)(nil).IsVersionFromSameCluster), version1, version2)
+}
+
+// RegisterMetadataChangeCallback mocks base method.
+func (m *MockMetadata) RegisterMetadataChangeCallback(callbackId any, cb CallbackFn) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "RegisterMetadataChangeCallback", callbackId, cb)
+}
+
+// RegisterMetadataChangeCallback indicates an expected call of RegisterMetadataChangeCallback.
+func (mr *MockMetadataMockRecorder) RegisterMetadataChangeCallback(callbackId, cb interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RegisterMetadataChangeCallback", reflect.TypeOf((*MockMetadata)(nil).RegisterMetadataChangeCallback), callbackId, cb)
+}
+
+// Start mocks base method.
+func (m *MockMetadata) Start() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Start")
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockMetadataMockRecorder) Start() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockMetadata)(nil).Start))
+}
+
+// Stop mocks base method.
+func (m *MockMetadata) Stop() {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Stop")
+}
+
+// Stop indicates an expected call of Stop.
+func (mr *MockMetadataMockRecorder) Stop() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockMetadata)(nil).Stop))
+}
+
+// UnRegisterMetadataChangeCallback mocks base method.
+func (m *MockMetadata) UnRegisterMetadataChangeCallback(callbackId any) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UnRegisterMetadataChangeCallback", callbackId)
+}
+
+// UnRegisterMetadataChangeCallback indicates an expected call of UnRegisterMetadataChangeCallback.
+func (mr *MockMetadataMockRecorder) UnRegisterMetadataChangeCallback(callbackId interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnRegisterMetadataChangeCallback", reflect.TypeOf((*MockMetadata)(nil).UnRegisterMetadataChangeCallback), callbackId)
 }

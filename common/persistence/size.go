@@ -24,37 +24,52 @@
 
 package persistence
 
+import (
+	persistencespb "go.temporal.io/server/api/persistence/v1"
+	"go.temporal.io/server/service/history/tasks"
+)
+
 func statusOfInternalWorkflow(
-	state *InternalWorkflowMutableState,
+	internalState *InternalWorkflowMutableState,
+	state *persistencespb.WorkflowMutableState,
 	historyStatistics *HistoryStatistics,
 ) *MutableStateStatistics {
-	if state == nil {
+	if internalState == nil {
 		return nil
 	}
 
-	executionInfoSize := sizeOfBlob(state.ExecutionInfo)
-	executionStateSize := sizeOfBlob(state.ExecutionState)
+	executionInfoSize := sizeOfBlob(internalState.ExecutionInfo)
+	executionStateSize := sizeOfBlob(internalState.ExecutionState)
 
-	activityInfoCount := len(state.ActivityInfos)
-	activityInfoSize := sizeOfInt64BlobMap(state.ActivityInfos)
+	totalActivityCount := state.ExecutionInfo.ActivityCount
+	activityInfoCount := len(internalState.ActivityInfos)
+	activityInfoSize := sizeOfInt64BlobMap(internalState.ActivityInfos)
 
-	timerInfoCount := len(state.TimerInfos)
-	timerInfoSize := sizeOfStringBlobMap(state.TimerInfos)
+	totalUserTimerCount := state.ExecutionInfo.UserTimerCount
+	timerInfoCount := len(internalState.TimerInfos)
+	timerInfoSize := sizeOfStringBlobMap(internalState.TimerInfos)
 
-	childExecutionInfoCount := len(state.ChildExecutionInfos)
-	childExecutionInfoSize := sizeOfInt64BlobMap(state.ChildExecutionInfos)
+	totalChildExecutionCount := state.ExecutionInfo.ChildExecutionCount
+	childExecutionInfoCount := len(internalState.ChildExecutionInfos)
+	childExecutionInfoSize := sizeOfInt64BlobMap(internalState.ChildExecutionInfos)
 
-	requestCancelInfoCount := len(state.RequestCancelInfos)
-	requestCancelInfoSize := sizeOfInt64BlobMap(state.RequestCancelInfos)
+	totalRequestCancelExternalCount := state.ExecutionInfo.RequestCancelExternalCount
+	requestCancelInfoCount := len(internalState.RequestCancelInfos)
+	requestCancelInfoSize := sizeOfInt64BlobMap(internalState.RequestCancelInfos)
 
-	signalInfoCount := len(state.SignalInfos)
-	signalInfoSize := sizeOfInt64BlobMap(state.SignalInfos)
+	totalSignalExternalCount := state.ExecutionInfo.SignalExternalCount
+	signalInfoCount := len(internalState.SignalInfos)
+	signalInfoSize := sizeOfInt64BlobMap(internalState.SignalInfos)
 
-	signalRequestIDCount := len(state.SignalRequestedIDs)
-	signalRequestIDSize := sizeOfStringSlice(state.SignalRequestedIDs)
+	totalSignalCount := state.ExecutionInfo.SignalCount
+	signalRequestIDCount := len(internalState.SignalRequestedIDs)
+	signalRequestIDSize := sizeOfStringSlice(internalState.SignalRequestedIDs)
 
-	bufferedEventsCount := len(state.BufferedEvents)
-	bufferedEventsSize := sizeOfBlobSlice(state.BufferedEvents)
+	bufferedEventsCount := len(internalState.BufferedEvents)
+	bufferedEventsSize := sizeOfBlobSlice(internalState.BufferedEvents)
+
+	totalUpdateCount := state.ExecutionInfo.UpdateCount
+	updateInfoCount := len(state.ExecutionInfo.UpdateInfos)
 
 	totalSize := executionInfoSize
 	totalSize += executionStateSize
@@ -73,26 +88,35 @@ func statusOfInternalWorkflow(
 		ExecutionInfoSize:  executionInfoSize,
 		ExecutionStateSize: executionStateSize,
 
-		ActivityInfoSize:  activityInfoSize,
-		ActivityInfoCount: activityInfoCount,
+		ActivityInfoSize:   activityInfoSize,
+		ActivityInfoCount:  activityInfoCount,
+		TotalActivityCount: totalActivityCount,
 
-		TimerInfoSize:  timerInfoSize,
-		TimerInfoCount: timerInfoCount,
+		TimerInfoSize:       timerInfoSize,
+		TimerInfoCount:      timerInfoCount,
+		TotalUserTimerCount: totalUserTimerCount,
 
-		ChildInfoSize:  childExecutionInfoSize,
-		ChildInfoCount: childExecutionInfoCount,
+		ChildInfoSize:            childExecutionInfoSize,
+		ChildInfoCount:           childExecutionInfoCount,
+		TotalChildExecutionCount: totalChildExecutionCount,
 
-		RequestCancelInfoSize:  requestCancelInfoSize,
-		RequestCancelInfoCount: requestCancelInfoCount,
+		RequestCancelInfoSize:           requestCancelInfoSize,
+		RequestCancelInfoCount:          requestCancelInfoCount,
+		TotalRequestCancelExternalCount: totalRequestCancelExternalCount,
 
-		SignalInfoSize:  signalInfoSize,
-		SignalInfoCount: signalInfoCount,
+		SignalInfoSize:           signalInfoSize,
+		SignalInfoCount:          signalInfoCount,
+		TotalSignalExternalCount: totalSignalExternalCount,
 
 		SignalRequestIDSize:  signalRequestIDSize,
 		SignalRequestIDCount: signalRequestIDCount,
+		TotalSignalCount:     totalSignalCount,
 
 		BufferedEventsSize:  bufferedEventsSize,
 		BufferedEventsCount: bufferedEventsCount,
+
+		UpdateInfoCount:  updateInfoCount,
+		TotalUpdateCount: totalUpdateCount,
 	}
 }
 
@@ -104,38 +128,47 @@ func statusOfInternalWorkflowMutation(
 		return nil
 	}
 
-	executionInfoSize := sizeOfBlob(mutation.ExecutionInfo)
+	executionInfoSize := sizeOfBlob(mutation.ExecutionInfoBlob)
 	executionStateSize := sizeOfBlob(mutation.ExecutionStateBlob)
 
+	totalActivityCount := mutation.ExecutionInfo.ActivityCount
 	activityInfoCount := len(mutation.UpsertActivityInfos)
 	activityInfoCount += len(mutation.DeleteActivityInfos)
 	activityInfoSize := sizeOfInt64BlobMap(mutation.UpsertActivityInfos)
 	activityInfoSize += sizeOfInt64Set(mutation.DeleteActivityInfos)
 
+	totalUserTimerCount := mutation.ExecutionInfo.UserTimerCount
 	timerInfoCount := len(mutation.UpsertTimerInfos)
 	timerInfoCount += len(mutation.DeleteTimerInfos)
 	timerInfoSize := sizeOfStringBlobMap(mutation.UpsertTimerInfos)
 	timerInfoSize += sizeOfStringSet(mutation.DeleteTimerInfos)
 
+	totalChildExecutionCount := mutation.ExecutionInfo.ChildExecutionCount
 	childExecutionInfoCount := len(mutation.UpsertChildExecutionInfos)
 	childExecutionInfoCount += len(mutation.DeleteChildExecutionInfos)
 	childExecutionInfoSize := sizeOfInt64BlobMap(mutation.UpsertChildExecutionInfos)
 	childExecutionInfoSize += sizeOfInt64Set(mutation.DeleteChildExecutionInfos)
 
+	totalRequestCancelExternalCount := mutation.ExecutionInfo.RequestCancelExternalCount
 	requestCancelInfoCount := len(mutation.UpsertRequestCancelInfos)
 	requestCancelInfoCount += len(mutation.DeleteRequestCancelInfos)
 	requestCancelInfoSize := sizeOfInt64BlobMap(mutation.UpsertRequestCancelInfos)
 	requestCancelInfoSize += sizeOfInt64Set(mutation.DeleteRequestCancelInfos)
 
+	totalSignalExternalCount := mutation.ExecutionInfo.SignalExternalCount
 	signalInfoCount := len(mutation.UpsertSignalInfos)
 	signalInfoCount += len(mutation.DeleteSignalInfos)
 	signalInfoSize := sizeOfInt64BlobMap(mutation.UpsertSignalInfos)
 	signalInfoSize += sizeOfInt64Set(mutation.DeleteSignalInfos)
 
+	totalSignalCount := mutation.ExecutionInfo.SignalCount
 	signalRequestIDCount := len(mutation.UpsertSignalRequestedIDs)
 	signalRequestIDCount += len(mutation.DeleteSignalRequestedIDs)
 	signalRequestIDSize := sizeOfStringSet(mutation.UpsertSignalRequestedIDs)
 	signalRequestIDSize += sizeOfStringSet(mutation.DeleteSignalRequestedIDs)
+
+	totalUpdateCount := mutation.ExecutionInfo.UpdateCount
+	updateInfoCount := len(mutation.ExecutionInfo.UpdateInfos)
 
 	bufferedEventsCount := 0
 	bufferedEventsSize := 0
@@ -144,7 +177,8 @@ func statusOfInternalWorkflowMutation(
 		bufferedEventsSize = mutation.NewBufferedEvents.Size()
 	}
 
-	// TODO what about tasks?
+	taskCountByCategory := taskCountsByCategory(&mutation.Tasks)
+
 	// TODO what about checksum?
 
 	totalSize := executionInfoSize
@@ -164,27 +198,46 @@ func statusOfInternalWorkflowMutation(
 		ExecutionInfoSize:  executionInfoSize,
 		ExecutionStateSize: executionStateSize,
 
-		ActivityInfoSize:  activityInfoSize,
-		ActivityInfoCount: activityInfoCount,
+		ActivityInfoSize:   activityInfoSize,
+		ActivityInfoCount:  activityInfoCount,
+		TotalActivityCount: totalActivityCount,
 
-		TimerInfoSize:  timerInfoSize,
-		TimerInfoCount: timerInfoCount,
+		TimerInfoSize:       timerInfoSize,
+		TimerInfoCount:      timerInfoCount,
+		TotalUserTimerCount: totalUserTimerCount,
 
-		ChildInfoSize:  childExecutionInfoSize,
-		ChildInfoCount: childExecutionInfoCount,
+		ChildInfoSize:            childExecutionInfoSize,
+		ChildInfoCount:           childExecutionInfoCount,
+		TotalChildExecutionCount: totalChildExecutionCount,
 
-		RequestCancelInfoSize:  requestCancelInfoSize,
-		RequestCancelInfoCount: requestCancelInfoCount,
+		RequestCancelInfoSize:           requestCancelInfoSize,
+		RequestCancelInfoCount:          requestCancelInfoCount,
+		TotalRequestCancelExternalCount: totalRequestCancelExternalCount,
 
-		SignalInfoSize:  signalInfoSize,
-		SignalInfoCount: signalInfoCount,
+		SignalInfoSize:           signalInfoSize,
+		SignalInfoCount:          signalInfoCount,
+		TotalSignalExternalCount: totalSignalExternalCount,
 
 		SignalRequestIDSize:  signalRequestIDSize,
 		SignalRequestIDCount: signalRequestIDCount,
+		TotalSignalCount:     totalSignalCount,
 
 		BufferedEventsSize:  bufferedEventsSize,
 		BufferedEventsCount: bufferedEventsCount,
+
+		TaskCountByCategory: taskCountByCategory,
+
+		TotalUpdateCount: totalUpdateCount,
+		UpdateInfoCount:  updateInfoCount,
 	}
+}
+
+func taskCountsByCategory(t *map[tasks.Category][]InternalHistoryTask) map[string]int {
+	counts := make(map[string]int)
+	for category, tasks := range *t {
+		counts[category.Name()] = len(tasks)
+	}
+	return counts
 }
 
 func statusOfInternalWorkflowSnapshot(
@@ -195,26 +248,35 @@ func statusOfInternalWorkflowSnapshot(
 		return nil
 	}
 
-	executionInfoSize := sizeOfBlob(snapshot.ExecutionInfo)
+	executionInfoSize := sizeOfBlob(snapshot.ExecutionInfoBlob)
 	executionStateSize := sizeOfBlob(snapshot.ExecutionStateBlob)
 
+	totalActivityCount := snapshot.ExecutionInfo.ActivityCount
 	activityInfoCount := len(snapshot.ActivityInfos)
 	activityInfoSize := sizeOfInt64BlobMap(snapshot.ActivityInfos)
 
+	totalUserTimerCount := snapshot.ExecutionInfo.UserTimerCount
 	timerInfoCount := len(snapshot.TimerInfos)
 	timerInfoSize := sizeOfStringBlobMap(snapshot.TimerInfos)
 
+	totalChildExecutionCount := snapshot.ExecutionInfo.ChildExecutionCount
 	childExecutionInfoCount := len(snapshot.ChildExecutionInfos)
 	childExecutionInfoSize := sizeOfInt64BlobMap(snapshot.ChildExecutionInfos)
 
+	totalRequestCancelExternalCount := snapshot.ExecutionInfo.RequestCancelExternalCount
 	requestCancelInfoCount := len(snapshot.RequestCancelInfos)
 	requestCancelInfoSize := sizeOfInt64BlobMap(snapshot.RequestCancelInfos)
 
+	totalSignalExternalCount := snapshot.ExecutionInfo.SignalExternalCount
 	signalInfoCount := len(snapshot.SignalInfos)
 	signalInfoSize := sizeOfInt64BlobMap(snapshot.SignalInfos)
 
+	totalSignalCount := snapshot.ExecutionInfo.SignalCount
 	signalRequestIDCount := len(snapshot.SignalRequestedIDs)
 	signalRequestIDSize := sizeOfStringSet(snapshot.SignalRequestedIDs)
+
+	totalUpdateCount := snapshot.ExecutionInfo.UpdateCount
+	updateInfoCount := len(snapshot.ExecutionInfo.UpdateInfos)
 
 	bufferedEventsCount := 0
 	bufferedEventsSize := 0
@@ -229,6 +291,8 @@ func statusOfInternalWorkflowSnapshot(
 	totalSize += signalRequestIDSize
 	totalSize += bufferedEventsSize
 
+	taskCountByCategory := taskCountsByCategory(&snapshot.Tasks)
+
 	return &MutableStateStatistics{
 		TotalSize:         totalSize,
 		HistoryStatistics: historyStatistics,
@@ -236,25 +300,36 @@ func statusOfInternalWorkflowSnapshot(
 		ExecutionInfoSize:  executionInfoSize,
 		ExecutionStateSize: executionStateSize,
 
-		ActivityInfoSize:  activityInfoSize,
-		ActivityInfoCount: activityInfoCount,
+		ActivityInfoSize:   activityInfoSize,
+		ActivityInfoCount:  activityInfoCount,
+		TotalActivityCount: totalActivityCount,
 
-		TimerInfoSize:  timerInfoSize,
-		TimerInfoCount: timerInfoCount,
+		TimerInfoSize:       timerInfoSize,
+		TimerInfoCount:      timerInfoCount,
+		TotalUserTimerCount: totalUserTimerCount,
 
-		ChildInfoSize:  childExecutionInfoSize,
-		ChildInfoCount: childExecutionInfoCount,
+		ChildInfoSize:            childExecutionInfoSize,
+		ChildInfoCount:           childExecutionInfoCount,
+		TotalChildExecutionCount: totalChildExecutionCount,
 
-		RequestCancelInfoSize:  requestCancelInfoSize,
-		RequestCancelInfoCount: requestCancelInfoCount,
+		RequestCancelInfoSize:           requestCancelInfoSize,
+		RequestCancelInfoCount:          requestCancelInfoCount,
+		TotalRequestCancelExternalCount: totalRequestCancelExternalCount,
 
-		SignalInfoSize:  signalInfoSize,
-		SignalInfoCount: signalInfoCount,
+		SignalInfoSize:           signalInfoSize,
+		SignalInfoCount:          signalInfoCount,
+		TotalSignalExternalCount: totalSignalExternalCount,
 
 		SignalRequestIDSize:  signalRequestIDSize,
 		SignalRequestIDCount: signalRequestIDCount,
+		TotalSignalCount:     totalSignalCount,
 
 		BufferedEventsSize:  bufferedEventsSize,
 		BufferedEventsCount: bufferedEventsCount,
+
+		TaskCountByCategory: taskCountByCategory,
+
+		TotalUpdateCount: totalUpdateCount,
+		UpdateInfoCount:  updateInfoCount,
 	}
 }

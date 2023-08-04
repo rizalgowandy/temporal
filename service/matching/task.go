@@ -61,7 +61,7 @@ type (
 		source           enumsspb.TaskSource
 		forwardedFrom    string     // name of the child partition this task is forwarded from (empty if not forwarded)
 		responseC        chan error // non-nil only where there is a caller waiting for response (sync-match)
-		backlogCountHint int64
+		backlogCountHint func() int64
 	}
 )
 
@@ -120,6 +120,10 @@ func (task *internalTask) isForwarded() bool {
 	return task.forwardedFrom != ""
 }
 
+func (task *internalTask) isSyncMatchTask() bool {
+	return task.responseC != nil
+}
+
 func (task *internalTask) workflowExecution() *commonpb.WorkflowExecution {
 	switch {
 	case task.event != nil:
@@ -160,6 +164,7 @@ func (task *internalTask) finish(err error) {
 	case task.responseC != nil:
 		task.responseC <- err
 	case task.event.completionFunc != nil:
+		// TODO: this probably should not be done synchronously in PollWorkflow/ActivityTaskQueue
 		task.event.completionFunc(task.event.AllocatedTaskInfo, err)
 	}
 }

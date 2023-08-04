@@ -31,6 +31,7 @@ import (
 
 	historypb "go.temporal.io/api/history/v1"
 	workflowpb "go.temporal.io/api/workflow/v1"
+
 	"go.temporal.io/server/common/searchattribute"
 
 	archiverspb "go.temporal.io/server/api/archiver/v1"
@@ -73,7 +74,7 @@ type (
 	HistoryBootstrapContainer struct {
 		ExecutionManager persistence.ExecutionManager
 		Logger           log.Logger
-		MetricsClient    metrics.Client
+		MetricsHandler   metrics.Handler
 		ClusterMetadata  cluster.Metadata
 	}
 
@@ -98,7 +99,7 @@ type (
 	// VisibilityBootstrapContainer contains components needed by all visibility Archiver implementations
 	VisibilityBootstrapContainer struct {
 		Logger          log.Logger
-		MetricsClient   metrics.Client
+		MetricsHandler  metrics.Handler
 		ClusterMetadata cluster.Metadata
 	}
 

@@ -25,92 +25,103 @@
 package worker
 
 import (
-	"context"
-
 	"go.uber.org/fx"
 
-	"go.temporal.io/server/api/historyservice/v1"
-	"go.temporal.io/server/client"
-	"go.temporal.io/server/client/history"
-	"go.temporal.io/server/common"
+	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
-	"go.temporal.io/server/common/persistence"
-	persistenceClient "go.temporal.io/server/common/persistence/client"
+	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/persistence/visibility"
+	"go.temporal.io/server/common/persistence/visibility/manager"
+	esclient "go.temporal.io/server/common/persistence/visibility/store/elasticsearch/client"
+	"go.temporal.io/server/common/resolver"
 	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/searchattribute"
 	"go.temporal.io/server/service"
 	"go.temporal.io/server/service/worker/addsearchattributes"
-	"go.temporal.io/server/service/worker/scanner/replication"
+	"go.temporal.io/server/service/worker/batcher"
+	"go.temporal.io/server/service/worker/deletenamespace"
+	"go.temporal.io/server/service/worker/migration"
+	"go.temporal.io/server/service/worker/scheduler"
 )
 
 var Module = fx.Options(
-	replication.Module,
+	migration.Module,
 	addsearchattributes.Module,
-	resource.DepsModule,
-	fx.Provide(ParamsExpandProvider),
+	resource.Module,
+	deletenamespace.Module,
+	scheduler.Module,
+	batcher.Module,
+	fx.Provide(VisibilityManagerProvider),
 	fx.Provide(dynamicconfig.NewCollection),
 	fx.Provide(ThrottledLoggerRpsFnProvider),
-	fx.Provide(NewConfig),
-	fx.Provide(PersistenceMaxQpsProvider),
-	fx.Provide(NamespaceReplicationQueueProvider),
-	fx.Provide(PersistenceTaskManagerProvider),
-	fx.Provide(HistoryServiceClientProvider),
+	fx.Provide(ConfigProvider),
+	fx.Provide(PersistenceRateLimitingParamsProvider),
 	fx.Provide(NewService),
 	fx.Provide(NewWorkerManager),
+	fx.Provide(NewPerNamespaceWorkerManager),
 	fx.Invoke(ServiceLifetimeHooks),
 )
-
-func ParamsExpandProvider(params *resource.BootstrapParams) common.RPCFactory {
-	return params.RPCFactory
-}
 
 func ThrottledLoggerRpsFnProvider(serviceConfig *Config) resource.ThrottledLoggerRpsFn {
 	return func() float64 { return float64(serviceConfig.ThrottledLogRPS()) }
 }
 
-func PersistenceMaxQpsProvider(
+func PersistenceRateLimitingParamsProvider(
 	serviceConfig *Config,
-) persistenceClient.PersistenceMaxQps {
-	return service.PersistenceMaxQpsFn(serviceConfig.PersistenceMaxQPS, serviceConfig.PersistenceGlobalMaxQPS)
-}
-
-func NamespaceReplicationQueueProvider(bean persistenceClient.Bean) persistence.NamespaceReplicationQueue {
-	return bean.GetNamespaceReplicationQueue()
-}
-
-func PersistenceTaskManagerProvider(bean persistenceClient.Bean) persistence.TaskManager {
-	return bean.GetTaskManager()
-}
-
-func HistoryServiceClientProvider(bean client.Bean) historyservice.HistoryServiceClient {
-	historyRawClient := bean.GetHistoryClient()
-	return history.NewRetryableClient(
-		historyRawClient,
-		common.CreateHistoryServiceRetryPolicy(),
-		common.IsWhitelistServiceTransientError,
+) service.PersistenceRateLimitingParams {
+	return service.NewPersistenceRateLimitingParams(
+		serviceConfig.PersistenceMaxQPS,
+		serviceConfig.PersistenceGlobalMaxQPS,
+		serviceConfig.PersistenceNamespaceMaxQPS,
+		serviceConfig.PersistencePerShardNamespaceMaxQPS,
+		serviceConfig.EnablePersistencePriorityRateLimiting,
+		serviceConfig.OperatorRPSRatio,
+		serviceConfig.PersistenceDynamicRateLimitingParams,
 	)
-
 }
 
-func ServiceLifetimeHooks(
-	lc fx.Lifecycle,
-	svcStoppedCh chan struct{},
-	svc *Service,
-) {
-	lc.Append(
-		fx.Hook{
-			OnStart: func(context.Context) error {
-				go func(svc common.Daemon, svcStoppedCh chan<- struct{}) {
-					// Start is blocked until Stop() is called.
-					svc.Start()
-					close(svcStoppedCh)
-				}(svc, svcStoppedCh)
-
-				return nil
-			},
-			OnStop: func(ctx context.Context) error {
-				svc.Stop()
-				return nil
-			},
-		},
+func ConfigProvider(
+	dc *dynamicconfig.Collection,
+	persistenceConfig *config.Persistence,
+) *Config {
+	return NewConfig(
+		dc,
+		persistenceConfig,
+		persistenceConfig.StandardVisibilityConfigExist(),
+		persistenceConfig.AdvancedVisibilityConfigExist(),
 	)
+}
+
+func VisibilityManagerProvider(
+	logger log.Logger,
+	metricsHandler metrics.Handler,
+	persistenceConfig *config.Persistence,
+	serviceConfig *Config,
+	esClient esclient.Client,
+	persistenceServiceResolver resolver.ServiceResolver,
+	searchAttributesMapperProvider searchattribute.MapperProvider,
+	saProvider searchattribute.Provider,
+) (manager.VisibilityManager, error) {
+	return visibility.NewManager(
+		*persistenceConfig,
+		persistenceServiceResolver,
+		esClient,
+		nil, // worker visibility never write
+		saProvider,
+		searchAttributesMapperProvider,
+		serviceConfig.VisibilityPersistenceMaxReadQPS,
+		serviceConfig.VisibilityPersistenceMaxWriteQPS,
+		serviceConfig.OperatorRPSRatio,
+		serviceConfig.EnableReadFromSecondaryVisibility,
+		dynamicconfig.GetStringPropertyFn(visibility.SecondaryVisibilityWritingModeOff), // worker visibility never write
+		serviceConfig.VisibilityDisableOrderByClause,
+		serviceConfig.VisibilityEnableManualPagination,
+		metricsHandler,
+		logger,
+	)
+}
+
+func ServiceLifetimeHooks(lc fx.Lifecycle, svc *Service) {
+	lc.Append(fx.StartStopHook(svc.Start, svc.Stop))
 }

@@ -49,7 +49,7 @@ CREATE TABLE current_executions(
   workflow_id VARCHAR(255) NOT NULL,
   --
   run_id BINARY(16) NOT NULL,
-  create_request_id VARCHAR(64) NOT NULL,
+  create_request_id VARCHAR(255) NOT NULL,
   state INT NOT NULL,
   status INT NOT NULL,
   start_version BIGINT NOT NULL DEFAULT 0,
@@ -79,6 +79,7 @@ CREATE TABLE tasks (
   PRIMARY KEY (range_hash, task_queue_id, task_id)
 );
 
+-- Stores ephemeral task queue information such as ack levels and expiry times
 CREATE TABLE task_queues (
   range_hash INT UNSIGNED NOT NULL,
   task_queue_id VARBINARY(272) NOT NULL,
@@ -87,6 +88,45 @@ CREATE TABLE task_queues (
   data MEDIUMBLOB NOT NULL,
   data_encoding VARCHAR(16) NOT NULL,
   PRIMARY KEY (range_hash, task_queue_id)
+);
+
+-- Stores task queue information such as user provided versioning data
+CREATE TABLE task_queue_user_data (
+  namespace_id    BINARY(16) NOT NULL,
+  task_queue_name VARCHAR(255) NOT NULL,
+  data            MEDIUMBLOB NOT NULL,  -- temporal.server.api.persistence.v1.TaskQueueUserData
+  data_encoding   VARCHAR(16) NOT NULL, -- Encoding type used for serialization, in practice this should always be proto3
+  version         BIGINT NOT NULL,      -- Version of this row, used for optimistic concurrency
+  PRIMARY KEY (namespace_id, task_queue_name)
+);
+
+-- Stores a mapping between build ids and task queues
+CREATE TABLE build_id_to_task_queue (
+  namespace_id    BINARY(16) NOT NULL,
+  build_id        VARCHAR(255) NOT NULL,
+  task_queue_name VARCHAR(255) NOT NULL,
+  PRIMARY KEY (namespace_id, build_id, task_queue_name)
+);
+
+CREATE TABLE history_immediate_tasks(
+  shard_id INT NOT NULL,
+  category_id INT NOT NULL,
+  task_id BIGINT NOT NULL,
+  --
+  data MEDIUMBLOB NOT NULL,
+  data_encoding VARCHAR(16) NOT NULL,
+  PRIMARY KEY (shard_id, category_id, task_id)
+);
+
+CREATE TABLE history_scheduled_tasks (
+  shard_id INT NOT NULL,
+  category_id INT NOT NULL,
+  visibility_timestamp DATETIME(6) NOT NULL,
+  task_id BIGINT NOT NULL,
+  --
+  data MEDIUMBLOB NOT NULL,
+  data_encoding VARCHAR(16) NOT NULL,
+  PRIMARY KEY (shard_id, category_id, visibility_timestamp, task_id)
 );
 
 CREATE TABLE transfer_tasks(
@@ -134,15 +174,6 @@ CREATE TABLE visibility_tasks(
   data MEDIUMBLOB NOT NULL,
   data_encoding VARCHAR(16) NOT NULL,
   PRIMARY KEY (shard_id, task_id)
-);
-
-CREATE TABLE tiered_storage_tasks (
-    shard_id      INT         NOT NULL,
-    task_id       BIGINT      NOT NULL,
-    --
-    data          MEDIUMBLOB  NOT NULL,
-    data_encoding VARCHAR(16) NOT NULL,
-    PRIMARY KEY (shard_id, task_id)
 );
 
 CREATE TABLE activity_info_maps (
@@ -211,7 +242,7 @@ CREATE TABLE signals_requested_sets (
   namespace_id BINARY(16) NOT NULL,
   workflow_id VARCHAR(255) NOT NULL,
   run_id BINARY(16) NOT NULL,
-  signal_id VARCHAR(64) NOT NULL,
+  signal_id VARCHAR(255) NOT NULL,
   --
   PRIMARY KEY (shard_id, namespace_id, workflow_id, run_id, signal_id)
 );
@@ -257,15 +288,6 @@ CREATE TABLE queue_metadata (
   PRIMARY KEY(queue_type)
 );
 
--- TODO deprecate this table in v1.15+
-CREATE TABLE cluster_metadata (
-  metadata_partition        INT NOT NULL,
-  data                      MEDIUMBLOB NOT NULL,
-  data_encoding             VARCHAR(16) NOT NULL,
-  version                   BIGINT NOT NULL,
-  PRIMARY KEY(metadata_partition)
-);
-
 CREATE TABLE cluster_metadata_info (
   metadata_partition        INT NOT NULL,
   cluster_name              VARCHAR(255) NOT NULL,
@@ -282,9 +304,9 @@ CREATE TABLE cluster_membership
     rpc_address          VARCHAR(128) NOT NULL,
     rpc_port             SMALLINT NOT NULL,
     role                 TINYINT NOT NULL,
-    session_start        TIMESTAMP DEFAULT '1970-01-01 00:00:01',
-    last_heartbeat       TIMESTAMP DEFAULT '1970-01-01 00:00:01',
-    record_expiry        TIMESTAMP DEFAULT '1970-01-01 00:00:01',
+    session_start        TIMESTAMP DEFAULT '1970-01-02 00:00:01',
+    last_heartbeat       TIMESTAMP DEFAULT '1970-01-02 00:00:01',
+    record_expiry        TIMESTAMP DEFAULT '1970-01-02 00:00:01',
     INDEX (role, host_id),
     INDEX (role, last_heartbeat),
     INDEX (rpc_address, role),
@@ -292,4 +314,3 @@ CREATE TABLE cluster_membership
     INDEX (record_expiry),
     PRIMARY KEY (membership_partition, host_id)
 );
-

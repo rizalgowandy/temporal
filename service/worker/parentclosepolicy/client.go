@@ -37,56 +37,64 @@ import (
 
 	"go.temporal.io/server/common/log"
 	"go.temporal.io/server/common/metrics"
+	"go.temporal.io/server/common/sdk"
 )
 
 type (
 
 	// Client is used to send request to processor workflow
 	Client interface {
-		SendParentClosePolicyRequest(Request) error
+		SendParentClosePolicyRequest(context.Context, Request) error
 	}
 
 	clientImpl struct {
-		metricsClient  metrics.Client
-		logger         log.Logger
-		temporalClient sdkclient.Client
-		numWorkflows   int
+		metricsHandler   metrics.Handler
+		logger           log.Logger
+		sdkClientFactory sdk.ClientFactory
+		numWorkflows     int
 	}
 )
 
 var _ Client = (*clientImpl)(nil)
 
 const (
-	signalTimeout    = 400 * time.Millisecond
-	workflowIDPrefix = "parent-close-policy-workflow"
+	signalTimeout         = 400 * time.Millisecond
+	workflowIDPrefix      = "parent-close-policy-workflow"
+	workflowTaskTimeout   = time.Minute
+	workflowIDReusePolicy = enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE
 )
 
 // NewClient creates a new Client
 func NewClient(
-	metricsClient metrics.Client,
+	metricsHandler metrics.Handler,
 	logger log.Logger,
-	publicClient sdkclient.Client,
+	sdkClientFactory sdk.ClientFactory,
 	numWorkflows int,
 ) Client {
 	return &clientImpl{
-		metricsClient:  metricsClient,
-		logger:         logger,
-		temporalClient: publicClient,
-		numWorkflows:   numWorkflows,
+		metricsHandler:   metricsHandler,
+		logger:           logger,
+		sdkClientFactory: sdkClientFactory,
+		numWorkflows:     numWorkflows,
 	}
 }
 
-func (c *clientImpl) SendParentClosePolicyRequest(request Request) error {
-	randomID := rand.Intn(c.numWorkflows)
-	workflowID := fmt.Sprintf("%v-%v", workflowIDPrefix, randomID)
+func (c *clientImpl) SendParentClosePolicyRequest(ctx context.Context, request Request) error {
+	workflowID := getWorkflowID(c.numWorkflows)
 	workflowOptions := sdkclient.StartWorkflowOptions{
 		ID:                    workflowID,
 		TaskQueue:             processorTaskQueueName,
-		WorkflowTaskTimeout:   time.Minute,
-		WorkflowIDReusePolicy: enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
+		WorkflowTaskTimeout:   workflowTaskTimeout,
+		WorkflowIDReusePolicy: workflowIDReusePolicy,
 	}
-	signalCtx, cancel := context.WithTimeout(context.Background(), signalTimeout)
+	signalCtx, cancel := context.WithTimeout(ctx, signalTimeout)
 	defer cancel()
-	_, err := c.temporalClient.SignalWithStartWorkflow(signalCtx, workflowID, processorChannelName, request, workflowOptions, processorWFTypeName, nil)
+
+	sdkClient := c.sdkClientFactory.GetSystemClient()
+	_, err := sdkClient.SignalWithStartWorkflow(signalCtx, workflowID, processorChannelName, request, workflowOptions, processorWFTypeName, nil)
 	return err
+}
+
+func getWorkflowID(numWorkflows int) string {
+	return fmt.Sprintf("%v-%v", workflowIDPrefix, rand.Intn(numWorkflows))
 }

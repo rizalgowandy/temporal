@@ -46,6 +46,8 @@ const (
 	// included a typo. This is deprecated and only here to support backwards
 	// compatibility.
 	EnvKeyAvailabilityZoneTypo = "TEMPORAL_AVAILABILTY_ZONE"
+	// EnvKeyAllowNoAuth is the environment variable key for setting no authorizer
+	EnvKeyAllowNoAuth = "TEMPORAL_ALLOW_NO_AUTH"
 )
 
 const (
@@ -66,10 +68,9 @@ const (
 //
 // The hierarchy is as follows from lowest to highest
 //
-//   base.yaml
-//       env.yaml   -- environment is one of the input params ex-development
-//         env_az.yaml -- zone is another input param
-//
+//	base.yaml
+//	    env.yaml   -- environment is one of the input params ex-development
+//	      env_az.yaml -- zone is another input param
 func Load(env string, configDir string, zone string, config interface{}) error {
 	if len(env) == 0 {
 		env = envDevelopment

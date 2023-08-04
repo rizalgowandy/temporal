@@ -46,59 +46,76 @@ func EncodeValue(val interface{}, t enumspb.IndexedValueType) (*commonpb.Payload
 }
 
 // DecodeValue decodes search attribute value from Payload using (in order):
-// 1. type from MetadataType field,
-// 2. passed type t.
-func DecodeValue(value *commonpb.Payload, t enumspb.IndexedValueType) (interface{}, error) {
-	valueTypeMetadata, metadataHasValueType := value.Metadata[MetadataType]
-	if metadataHasValueType {
-		if ivt, ok := enumspb.IndexedValueType_value[string(valueTypeMetadata)]; ok {
-			// MetadataType field has priority over passed type.
-			t = enumspb.IndexedValueType(ivt)
-		}
+// 1. passed type t.
+// 2. type from MetadataType field, if t is not specified.
+// allowList allows list of values when it's not keyword list type.
+func DecodeValue(
+	value *commonpb.Payload,
+	t enumspb.IndexedValueType,
+	allowList bool,
+) (any, error) {
+	if t == enumspb.INDEXED_VALUE_TYPE_UNSPECIFIED {
+		t = enumspb.IndexedValueType(
+			enumspb.IndexedValueType_value[string(value.Metadata[MetadataType])],
+		)
 	}
 
 	switch t {
-	case enumspb.INDEXED_VALUE_TYPE_TEXT, enumspb.INDEXED_VALUE_TYPE_KEYWORD:
-		var val string
-		if err := payload.Decode(value, &val); err != nil {
-			var listVal []string
-			err = payload.Decode(value, &listVal)
-			return listVal, err
-		}
-		return val, nil
-	case enumspb.INDEXED_VALUE_TYPE_INT:
-		var val int64
-		if err := payload.Decode(value, &val); err != nil {
-			var listVal []int64
-			err = payload.Decode(value, &listVal)
-			return listVal, err
-		}
-		return val, nil
-	case enumspb.INDEXED_VALUE_TYPE_DOUBLE:
-		var val float64
-		if err := payload.Decode(value, &val); err != nil {
-			var listVal []float64
-			err = payload.Decode(value, &listVal)
-			return listVal, err
-		}
-		return val, nil
 	case enumspb.INDEXED_VALUE_TYPE_BOOL:
-		var val bool
-		if err := payload.Decode(value, &val); err != nil {
-			var listVal []bool
-			err = payload.Decode(value, &listVal)
-			return listVal, err
-		}
-		return val, nil
+		return decodeValueTyped[bool](value, allowList)
 	case enumspb.INDEXED_VALUE_TYPE_DATETIME:
-		var val time.Time
-		if err := payload.Decode(value, &val); err != nil {
-			var listVal []time.Time
-			err = payload.Decode(value, &listVal)
-			return listVal, err
-		}
-		return val, nil
+		return decodeValueTyped[time.Time](value, allowList)
+	case enumspb.INDEXED_VALUE_TYPE_DOUBLE:
+		return decodeValueTyped[float64](value, allowList)
+	case enumspb.INDEXED_VALUE_TYPE_INT:
+		return decodeValueTyped[int64](value, allowList)
+	case enumspb.INDEXED_VALUE_TYPE_KEYWORD:
+		return decodeValueTyped[string](value, allowList)
+	case enumspb.INDEXED_VALUE_TYPE_TEXT:
+		return decodeValueTyped[string](value, allowList)
+	case enumspb.INDEXED_VALUE_TYPE_KEYWORD_LIST:
+		return decodeValueTyped[[]string](value, false)
 	default:
 		return nil, fmt.Errorf("%w: %v", ErrInvalidType, t)
 	}
+}
+
+// decodeValueTyped tries to decode to the given type.
+// If the input is a list and allowList is false, then it will return only the first element.
+// If the input is a list and allowList is true, then it will return the decoded list.
+//
+//nolint:revive // allowList is a control flag
+func decodeValueTyped[T any](value *commonpb.Payload, allowList bool) (any, error) {
+	// At first, it tries to decode to pointer of actual type (i.e. `*string` for `string`).
+	// This is to ensure that `nil` values are decoded back as `nil` using `NilPayloadConverter`.
+	// If value is not `nil` but some value of expected type, the code relies on the fact that
+	// search attributes are always encoded with `JsonPayloadConverter`, which uses standard
+	// `json.Unmarshal` function, which works fine with pointer types when decoding values.
+	// If decoding to pointer type fails, it tries to decode to array of the same type because
+	// search attributes support polymorphism: field of specific type may also have an array of that type.
+	// If resulting slice has zero length, it gets substitute with `nil` to treat nils and empty slices equally.
+	// If allowList is true, it returns the list as it is. If allowList is false and the list has
+	// only one element, then return it. Otherwise, return an error.
+	// If search attribute value is `nil`, it means that search attribute needs to be removed from the document.
+	var val *T
+	if err := payload.Decode(value, &val); err != nil {
+		var listVal []T
+		if err := payload.Decode(value, &listVal); err != nil {
+			return nil, err
+		}
+		if len(listVal) == 0 {
+			return nil, nil
+		}
+		if allowList {
+			return listVal, nil
+		}
+		if len(listVal) == 1 {
+			return listVal[0], nil
+		}
+		return nil, fmt.Errorf("list of values not allowed for type %T", listVal[0])
+	}
+	if val == nil {
+		return nil, nil
+	}
+	return *val, nil
 }

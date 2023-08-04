@@ -27,23 +27,28 @@ package tasks
 import (
 	"time"
 
+	enumsspb "go.temporal.io/server/api/enums/v1"
 	"go.temporal.io/server/common/definition"
 )
+
+var _ Task = (*DeleteExecutionVisibilityTask)(nil)
 
 type (
 	DeleteExecutionVisibilityTask struct {
 		definition.WorkflowKey
-		VisibilityTimestamp time.Time
-		TaskID              int64
-		Version             int64
+		VisibilityTimestamp            time.Time
+		TaskID                         int64
+		Version                        int64
+		CloseExecutionVisibilityTaskID int64
+		// These two fields are needed for cassandra standard visibility.
+		// TODO (alex): Remove them when cassandra standard visibility is removed.
+		StartTime *time.Time
+		CloseTime *time.Time
 	}
 )
 
 func (t *DeleteExecutionVisibilityTask) GetKey() Key {
-	return Key{
-		FireTime: time.Unix(0, 0),
-		TaskID:   t.TaskID,
-	}
+	return NewImmediateKey(t.TaskID)
 }
 
 func (t *DeleteExecutionVisibilityTask) GetVersion() int64 {
@@ -68,4 +73,12 @@ func (t *DeleteExecutionVisibilityTask) GetVisibilityTime() time.Time {
 
 func (t *DeleteExecutionVisibilityTask) SetVisibilityTime(timestamp time.Time) {
 	t.VisibilityTimestamp = timestamp
+}
+
+func (t *DeleteExecutionVisibilityTask) GetCategory() Category {
+	return CategoryVisibility
+}
+
+func (t *DeleteExecutionVisibilityTask) GetType() enumsspb.TaskType {
+	return enumsspb.TASK_TYPE_VISIBILITY_DELETE_EXECUTION
 }

@@ -24,6 +24,9 @@ package temporal.server.api.token.v1;
 
 option go_package = "go.temporal.io/server/api/token/v1;token";
 
+import "google/protobuf/timestamp.proto";
+import "dependencies/gogoproto/gogo.proto";
+import "temporal/server/api/clock/v1/message.proto";
 import "temporal/server/api/history/v1/message.proto";
 
 message HistoryContinuation {
@@ -38,7 +41,8 @@ message HistoryContinuation {
 }
 
 message RawHistoryContinuation{
-    string namespace = 1;
+    reserved 1;
+    string namespace_id = 10;
     string workflow_id = 2;
     string run_id = 3;
     int64 start_event_id = 4;
@@ -53,11 +57,15 @@ message Task {
     string namespace_id = 1;
     string workflow_id  = 2;
     string run_id = 3;
-    int64 schedule_id = 4;
-    int32 schedule_attempt = 5;
+    int64 scheduled_event_id = 4;
+    int32 attempt = 5;
     string activity_id = 6;
     string workflow_type = 7;
     string activity_type = 8;
+    temporal.server.api.clock.v1.VectorClock clock = 9;
+    int64 started_event_id = 10;
+    int64 version = 11;
+    google.protobuf.Timestamp started_time = 12 [(gogoproto.stdtime) = true];
 }
 
 message QueryTask {

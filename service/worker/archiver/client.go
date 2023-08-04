@@ -46,6 +46,7 @@ import (
 	"go.temporal.io/server/common/metrics"
 	"go.temporal.io/server/common/primitives/timestamp"
 	"go.temporal.io/server/common/quotas"
+	"go.temporal.io/server/common/sdk"
 	"go.temporal.io/server/common/searchattribute"
 )
 
@@ -64,13 +65,13 @@ type (
 
 	// ArchiveRequest is the request signal sent to the archival workflow
 	ArchiveRequest struct {
+		ShardID     int32
 		NamespaceID string
 		Namespace   string
 		WorkflowID  string
 		RunID       string
 
 		// history archival
-		ShardID              int32
 		BranchToken          []byte
 		NextEventID          int64
 		CloseFailoverVersion int64
@@ -97,10 +98,11 @@ type (
 	}
 
 	client struct {
-		metricsScope     metrics.Scope
+		metricsHandler   metrics.Handler
 		logger           log.Logger
-		temporalClient   sdkclient.Client
+		sdkClientFactory sdk.ClientFactory
 		numWorkflows     dynamicconfig.IntPropertyFn
+		signalTimeout    dynamicconfig.DurationPropertyFn
 		rateLimiter      quotas.RateLimiter
 		archiverProvider provider.ArchiverProvider
 	}
@@ -109,11 +111,7 @@ type (
 	ArchivalTarget int
 )
 
-const (
-	signalTimeout = 300 * time.Millisecond
-
-	tooManyRequestsErrMsg = "too many requests to archival workflow"
-)
+const tooManyRequestsErrMsg = "too many requests to archival workflow"
 
 const (
 	// ArchiveTargetHistory is the archive target for workflow history
@@ -124,21 +122,23 @@ const (
 
 // NewClient creates a new Client
 func NewClient(
-	metricsClient metrics.Client,
+	metricsHandler metrics.Handler,
 	logger log.Logger,
-	publicClient sdkclient.Client,
+	sdkClientFactory sdk.ClientFactory,
 	numWorkflows dynamicconfig.IntPropertyFn,
 	requestRPS dynamicconfig.IntPropertyFn,
+	signalTimeout dynamicconfig.DurationPropertyFn,
 	archiverProvider provider.ArchiverProvider,
 ) Client {
 	return &client{
-		metricsScope:   metricsClient.Scope(metrics.ArchiverClientScope),
-		logger:         logger,
-		temporalClient: publicClient,
-		numWorkflows:   numWorkflows,
+		metricsHandler:   metricsHandler.WithTags(metrics.OperationTag(metrics.ArchiverClientScope)),
+		logger:           logger,
+		sdkClientFactory: sdkClientFactory,
+		numWorkflows:     numWorkflows,
 		rateLimiter: quotas.NewDefaultOutgoingRateLimiter(
 			func() float64 { return float64(requestRPS()) },
 		),
+		signalTimeout:    signalTimeout,
 		archiverProvider: archiverProvider,
 	}
 }
@@ -148,13 +148,14 @@ func (c *client) Archive(ctx context.Context, request *ClientRequest) (*ClientRe
 	for _, target := range request.ArchiveRequest.Targets {
 		switch target {
 		case ArchiveTargetHistory:
-			c.metricsScope.IncCounter(metrics.ArchiverClientHistoryRequestCount)
+			c.metricsHandler.Counter(metrics.ArchiverClientHistoryRequestCount.GetMetricName()).Record(1)
 		case ArchiveTargetVisibility:
-			c.metricsScope.IncCounter(metrics.ArchiverClientVisibilityRequestCount)
+			c.metricsHandler.Counter(metrics.ArchiverClientVisibilityRequestCount.GetMetricName()).Record(1)
 		}
 	}
 	logger := log.With(
 		c.logger,
+		tag.ShardID(request.ArchiveRequest.ShardID),
 		tag.ArchivalCallerServiceName(request.CallerService),
 		tag.ArchivalArchiveAttemptedInline(request.AttemptArchiveInline),
 	)
@@ -199,12 +200,12 @@ func (c *client) archiveHistoryInline(ctx context.Context, request *ClientReques
 	var err error
 	defer func() {
 		if err != nil {
-			c.metricsScope.IncCounter(metrics.ArchiverClientHistoryInlineArchiveFailureCount)
+			c.metricsHandler.Counter(metrics.ArchiverClientHistoryInlineArchiveFailureCount.GetMetricName()).Record(1)
 			logger.Info("failed to perform workflow history archival inline", tag.Error(err))
 		}
 		errCh <- err
 	}()
-	c.metricsScope.IncCounter(metrics.ArchiverClientHistoryInlineArchiveAttemptCount)
+	c.metricsHandler.Counter(metrics.ArchiverClientHistoryInlineArchiveAttemptCount.GetMetricName()).Record(1)
 	URI, err := carchiver.NewURI(request.ArchiveRequest.HistoryURI)
 	if err != nil {
 		return
@@ -233,12 +234,12 @@ func (c *client) archiveVisibilityInline(ctx context.Context, request *ClientReq
 	var err error
 	defer func() {
 		if err != nil {
-			c.metricsScope.IncCounter(metrics.ArchiverClientVisibilityInlineArchiveFailureCount)
+			c.metricsHandler.Counter(metrics.ArchiverClientVisibilityInlineArchiveFailureCount.GetMetricName()).Record(1)
 			logger.Info("failed to perform visibility archival inline", tag.Error(err))
 		}
 		errCh <- err
 	}()
-	c.metricsScope.IncCounter(metrics.ArchiverClientVisibilityInlineArchiveAttemptCount)
+	c.metricsHandler.Counter(metrics.ArchiverClientVisibilityInlineArchiveAttemptCount.GetMetricName()).Record(1)
 	var uri carchiver.URI
 	uri, err = carchiver.NewURI(request.ArchiveRequest.VisibilityURI)
 	if err != nil {
@@ -275,10 +276,11 @@ func (c *client) archiveVisibilityInline(ctx context.Context, request *ClientReq
 }
 
 func (c *client) sendArchiveSignal(ctx context.Context, request *ArchiveRequest, taggedLogger log.Logger) error {
-	c.metricsScope.IncCounter(metrics.ArchiverClientSendSignalCount)
+	c.metricsHandler.Counter(metrics.ArchiverClientSendSignalCount.GetMetricName()).Record(1)
 	if ok := c.rateLimiter.Allow(); !ok {
 		c.logger.Error(tooManyRequestsErrMsg)
-		c.metricsScope.IncCounter(metrics.ServiceErrResourceExhaustedCounter)
+		c.metricsHandler.Counter(metrics.ServiceErrResourceExhaustedCounter.GetMetricName()).
+			Record(1, metrics.ResourceExhaustedCauseTag(enumspb.RESOURCE_EXHAUSTED_CAUSE_RPS_LIMIT))
 		return errors.New(tooManyRequestsErrMsg)
 	}
 
@@ -290,9 +292,11 @@ func (c *client) sendArchiveSignal(ctx context.Context, request *ArchiveRequest,
 		WorkflowTaskTimeout:      workflowTaskTimeout,
 		WorkflowIDReusePolicy:    enumspb.WORKFLOW_ID_REUSE_POLICY_ALLOW_DUPLICATE,
 	}
-	signalCtx, cancel := context.WithTimeout(context.Background(), signalTimeout)
+	signalCtx, cancel := context.WithTimeout(ctx, c.signalTimeout())
 	defer cancel()
-	_, err := c.temporalClient.SignalWithStartWorkflow(signalCtx, workflowID, signalName, *request, workflowOptions, archivalWorkflowFnName, nil)
+
+	sdkClient := c.sdkClientFactory.GetSystemClient()
+	_, err := sdkClient.SignalWithStartWorkflow(signalCtx, workflowID, signalName, *request, workflowOptions, archivalWorkflowFnName, nil)
 	if err != nil {
 		taggedLogger.Error("failed to send signal to archival system workflow",
 			tag.ArchivalRequestNamespaceID(request.NamespaceID),
@@ -302,7 +306,7 @@ func (c *client) sendArchiveSignal(ctx context.Context, request *ArchiveRequest,
 			tag.WorkflowID(workflowID),
 			tag.Error(err))
 
-		c.metricsScope.IncCounter(metrics.ArchiverClientSendSignalFailureCount)
+		c.metricsHandler.Counter(metrics.ArchiverClientSendSignalFailureCount.GetMetricName()).Record(1)
 		return err
 	}
 	return nil

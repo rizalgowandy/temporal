@@ -28,29 +28,37 @@ import (
 	"fmt"
 	"net/http"
 
+	"golang.org/x/exp/slices"
+	"google.golang.org/grpc"
+
 	"go.temporal.io/server/client"
 	"go.temporal.io/server/common/authorization"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/dynamicconfig"
 	"go.temporal.io/server/common/log"
+	"go.temporal.io/server/common/metrics"
 	persistenceClient "go.temporal.io/server/common/persistence/client"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/resolver"
 	"go.temporal.io/server/common/rpc/encryption"
 	"go.temporal.io/server/common/searchattribute"
-	"google.golang.org/grpc"
 )
 
 type (
+	synchronizationModeParams struct {
+		blockingStart bool
+		interruptCh   <-chan interface{}
+	}
+
 	serverOptions struct {
-		serviceNames map[string]struct{}
+		serviceNames map[primitives.ServiceName]struct{}
 
 		config    *config.Config
 		configDir string
 		env       string
 		zone      string
 
-		interruptCh   <-chan interface{}
-		blockingStart bool
+		startupSynchronizationMode synchronizationModeParams
 
 		logger                     log.Logger
 		namespaceLogger            log.Logger
@@ -58,7 +66,6 @@ type (
 		tlsConfigProvider          encryption.TLSConfigProvider
 		claimMapper                authorization.ClaimMapper
 		audienceGetter             authorization.JWTAudienceMapper
-		metricsReporter            interface{}
 		persistenceServiceResolver resolver.ServiceResolver
 		elasticsearchHttpClient    *http.Client
 		dynamicConfigClient        dynamicconfig.Client
@@ -66,6 +73,7 @@ type (
 		clientFactoryProvider      client.FactoryProvider
 		searchAttributesMapper     searchattribute.Mapper
 		customInterceptors         []grpc.UnaryServerInterceptor
+		metricHandler              metrics.Handler
 	}
 )
 
@@ -82,8 +90,8 @@ func newServerOptions(opts []ServerOption) *serverOptions {
 }
 
 func (so *serverOptions) loadAndValidate() error {
-	for serviceName, _ := range so.serviceNames {
-		if !isValidService(serviceName) {
+	for serviceName := range so.serviceNames {
+		if !slices.Contains(Services, string(serviceName)) {
 			return fmt.Errorf("invalid service %q in service list %v", serviceName, so.serviceNames)
 		}
 	}
@@ -118,18 +126,10 @@ func (so *serverOptions) validateConfig() error {
 		return err
 	}
 
-	for name, _ := range so.serviceNames {
-		if _, ok := so.config.Services[name]; !ok {
+	for name := range so.serviceNames {
+		if _, ok := so.config.Services[string(name)]; !ok {
 			return fmt.Errorf("%q service is missing in config", name)
 		}
 	}
 	return nil
-}
-func isValidService(service string) bool {
-	for _, s := range Services {
-		if s == service {
-			return true
-		}
-	}
-	return false
 }

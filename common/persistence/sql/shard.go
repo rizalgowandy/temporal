@@ -58,10 +58,9 @@ func (m *sqlShardStore) GetClusterName() string {
 }
 
 func (m *sqlShardStore) GetOrCreateShard(
+	ctx context.Context,
 	request *persistence.InternalGetOrCreateShardRequest,
 ) (*persistence.InternalGetOrCreateShardResponse, error) {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	row, err := m.Db.SelectFromShards(ctx, sqlplugin.ShardsFilter{
 		ShardID: request.ShardID,
 	})
@@ -71,7 +70,6 @@ func (m *sqlShardStore) GetOrCreateShard(
 			ShardInfo: persistence.NewDataBlob(row.Data, row.DataEncoding),
 		}, nil
 	case sql.ErrNoRows:
-		break
 	default:
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetOrCreateShard: failed to get ShardID %v. Error: %v", request.ShardID, err))
 	}
@@ -81,6 +79,9 @@ func (m *sqlShardStore) GetOrCreateShard(
 	}
 
 	rangeID, shardInfo, err := request.CreateShardInfo()
+	if err != nil {
+		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetOrCreateShard: failed to encode shard info for ShardID %v. Error: %v", request.ShardID, err))
+	}
 	row = &sqlplugin.ShardsRow{
 		ShardID:      request.ShardID,
 		RangeID:      rangeID,
@@ -95,17 +96,16 @@ func (m *sqlShardStore) GetOrCreateShard(
 	} else if m.Db.IsDupEntryError(err) {
 		// conflict, try again
 		request.CreateShardInfo = nil // prevent loop
-		return m.GetOrCreateShard(request)
+		return m.GetOrCreateShard(ctx, request)
 	} else {
 		return nil, serviceerror.NewUnavailable(fmt.Sprintf("GetOrCreateShard: failed to insert into shards table. Error: %v", err))
 	}
 }
 
 func (m *sqlShardStore) UpdateShard(
+	ctx context.Context,
 	request *persistence.InternalUpdateShardRequest,
 ) error {
-	ctx, cancel := newExecutionContext()
-	defer cancel()
 	return m.txExecute(ctx, "UpdateShard", func(tx sqlplugin.Tx) error {
 		if err := lockShard(ctx,
 			tx,
@@ -132,6 +132,13 @@ func (m *sqlShardStore) UpdateShard(
 		}
 		return nil
 	})
+}
+
+func (m *sqlShardStore) AssertShardOwnership(
+	ctx context.Context,
+	request *persistence.AssertShardOwnershipRequest,
+) error {
+	return nil
 }
 
 // initiated by the owning shard

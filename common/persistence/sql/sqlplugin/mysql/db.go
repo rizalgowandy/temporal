@@ -33,7 +33,7 @@ import (
 
 	"go.temporal.io/server/common/persistence/schema"
 	"go.temporal.io/server/common/persistence/sql/sqlplugin"
-	mysqlschema "go.temporal.io/server/schema/mysql"
+	mysqlschemaV57 "go.temporal.io/server/schema/mysql/v57"
 )
 
 // db represents a logical connection to mysql database
@@ -51,13 +51,13 @@ var _ sqlplugin.AdminDB = (*db)(nil)
 var _ sqlplugin.DB = (*db)(nil)
 var _ sqlplugin.Tx = (*db)(nil)
 
-// ErrDupEntry MySQL Error 1062 indicates a duplicate primary key i.e. the row already exists,
+// ErrDupEntryCode MySQL Error 1062 indicates a duplicate primary key i.e. the row already exists,
 // so we don't do the insert and return a ConditionalUpdate error.
-const ErrDupEntry = 1062
+const ErrDupEntryCode = 1062
 
 func (mdb *db) IsDupEntryError(err error) bool {
 	sqlErr, ok := err.(*mysql.MySQLError)
-	return ok && sqlErr.Number == ErrDupEntry
+	return ok && sqlErr.Number == ErrDupEntryCode
 }
 
 // newDB returns an instance of DB, which is a logical
@@ -111,13 +111,18 @@ func (mdb *db) PluginName() string {
 	return PluginName
 }
 
+// DbName returns the name of the database
+func (mdb *db) DbName() string {
+	return mdb.dbName
+}
+
 // ExpectedVersion returns expected version.
 func (mdb *db) ExpectedVersion() string {
 	switch mdb.dbKind {
 	case sqlplugin.DbKindMain:
-		return mysqlschema.Version
+		return mysqlschemaV57.Version
 	case sqlplugin.DbKindVisibility:
-		return mysqlschema.VisibilityVersion
+		return mysqlschemaV57.VisibilityVersion
 	default:
 		panic(fmt.Sprintf("unknown db kind %v", mdb.dbKind))
 	}

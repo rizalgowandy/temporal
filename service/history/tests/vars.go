@@ -43,16 +43,21 @@ import (
 var (
 	Version = int64(1234)
 
-	NamespaceID       = namespace.ID("deadbeef-0123-4567-890a-bcdef0123456")
-	Namespace         = namespace.Name("mock namespace name")
-	ParentNamespaceID = namespace.ID("deadbeef-0123-4567-890a-bcdef0123457")
-	ParentNamespace   = namespace.Name("mock parent namespace name")
-	TargetNamespaceID = namespace.ID("deadbeef-0123-4567-890a-bcdef0123458")
-	TargetNamespace   = namespace.Name("mock target namespace name")
-	ChildNamespaceID  = namespace.ID("deadbeef-0123-4567-890a-bcdef0123459")
-	ChildNamespace    = namespace.Name("mock child namespace name")
-	WorkflowID        = "mock-workflow-id"
-	RunID             = "0d00698f-08e1-4d36-a3e2-3bf109f5d2d6"
+	NamespaceID                              = namespace.ID("deadbeef-0123-4567-890a-bcdef0123456")
+	Namespace                                = namespace.Name("mock namespace name")
+	ParentNamespaceID                        = namespace.ID("deadbeef-0123-4567-890a-bcdef0123457")
+	ParentNamespace                          = namespace.Name("mock parent namespace name")
+	TargetNamespaceID                        = namespace.ID("deadbeef-0123-4567-890a-bcdef0123458")
+	TargetNamespace                          = namespace.Name("mock target namespace name")
+	ChildNamespaceID                         = namespace.ID("deadbeef-0123-4567-890a-bcdef0123459")
+	ChildNamespace                           = namespace.Name("mock child namespace name")
+	StandbyNamespaceID                       = namespace.ID("deadbeef-0123-4567-890a-bcdef0123460")
+	StandbyNamespace                         = namespace.Name("mock standby namespace name")
+	StandbyWithVisibilityArchivalNamespaceID = namespace.ID("deadbeef-0123-4567-890a-bcdef0123461")
+	StandbyWithVisibilityArchivalNamespace   = namespace.Name("mock standby with visibility archival namespace name")
+	MissedNamespaceID                        = namespace.ID("missed-namespace-id")
+	WorkflowID                               = "mock-workflow-id"
+	RunID                                    = "0d00698f-08e1-4d36-a3e2-3bf109f5d2d6"
 
 	LocalNamespaceEntry = namespace.NewLocalNamespaceForTest(
 		&persistencespb.NamespaceInfo{Id: NamespaceID.String(), Name: Namespace.String()},
@@ -108,6 +113,39 @@ var (
 		Version,
 	)
 
+	GlobalStandbyNamespaceEntry = namespace.NewGlobalNamespaceForTest(
+		&persistencespb.NamespaceInfo{Id: StandbyNamespaceID.String(), Name: StandbyNamespace.String()},
+		&persistencespb.NamespaceConfig{Retention: timestamp.DurationFromDays(1)},
+		&persistencespb.NamespaceReplicationConfig{
+			ActiveClusterName: cluster.TestAlternativeClusterName,
+			Clusters: []string{
+				cluster.TestCurrentClusterName,
+				cluster.TestAlternativeClusterName,
+			},
+		},
+		Version,
+	)
+
+	GlobalStandbyWithVisibilityArchivalNamespaceEntry = namespace.NewGlobalNamespaceForTest(
+		&persistencespb.NamespaceInfo{
+			Id:   StandbyWithVisibilityArchivalNamespaceID.String(),
+			Name: StandbyWithVisibilityArchivalNamespace.String(),
+		},
+		&persistencespb.NamespaceConfig{
+			Retention:               timestamp.DurationFromDays(1),
+			VisibilityArchivalState: enumspb.ARCHIVAL_STATE_ENABLED,
+			VisibilityArchivalUri:   "test:///visibility/archival",
+		},
+		&persistencespb.NamespaceReplicationConfig{
+			ActiveClusterName: cluster.TestAlternativeClusterName,
+			Clusters: []string{
+				cluster.TestCurrentClusterName,
+				cluster.TestAlternativeClusterName,
+			},
+		},
+		Version,
+	)
+
 	GlobalChildNamespaceEntry = namespace.NewGlobalNamespaceForTest(
 		&persistencespb.NamespaceInfo{Id: ChildNamespaceID.String(), Name: ChildNamespace.String()},
 		&persistencespb.NamespaceConfig{Retention: timestamp.DurationFromDays(1)},
@@ -141,8 +179,11 @@ var (
 
 func NewDynamicConfig() *configs.Config {
 	dc := dynamicconfig.NewNoopCollection()
-	config := configs.NewConfig(dc, 1, false, "")
+	config := configs.NewConfig(dc, 1, true, false)
 	// reduce the duration of long poll to increase test speed
 	config.LongPollExpirationInterval = dc.GetDurationPropertyFilteredByNamespace(dynamicconfig.HistoryLongPollExpirationInterval, 10*time.Second)
+	config.EnableActivityEagerExecution = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	config.EnableEagerWorkflowStart = dynamicconfig.GetBoolPropertyFnFilteredByNamespace(true)
+	config.NamespaceCacheRefreshInterval = dynamicconfig.GetDurationPropertyFn(time.Second)
 	return config
 }

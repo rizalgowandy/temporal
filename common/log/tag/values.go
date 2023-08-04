@@ -40,6 +40,11 @@ var (
 	WorkflowActionWorkflowSignaled               = workflowAction("add-workflow-signaled-event")
 	WorkflowActionWorkflowRecordMarker           = workflowAction("add-workflow-marker-record-event")
 	WorkflowActionUpsertWorkflowSearchAttributes = workflowAction("add-workflow-upsert-search-attributes-event")
+	WorkflowActionWorkflowPropertiesModified     = workflowAction("add-workflow-properties-modified-event")
+
+	// workflow update
+	WorkflowActionUpdateAccepted  = workflowAction("add-workflow-update-accepted-event")
+	WorkflowActionUpdateCompleted = workflowAction("add-workflow-update-completed-event")
 
 	// workflow task
 	WorkflowActionWorkflowTaskScheduled = workflowAction("add-workflowtask-scheduled-event")
@@ -101,14 +106,16 @@ var (
 
 // Pre-defined values for TagSysComponent
 var (
+	ComponentFX                       = component("fx")
 	ComponentTaskQueue                = component("taskqueue")
 	ComponentHistoryEngine            = component("history-engine")
 	ComponentHistoryCache             = component("history-cache")
 	ComponentEventsCache              = component("events-cache")
 	ComponentTransferQueue            = component("transfer-queue-processor")
 	ComponentVisibilityQueue          = component("visibility-queue-processor")
-	ComponentTieredStorageQueue       = component("tiered-storage-queue-processor")
+	ComponentArchivalQueue            = component("archival-queue-processor")
 	ComponentTimerQueue               = component("timer-queue-processor")
+	ComponentMemoryScheduledQueue     = component("memory-scheduled-queue-processor")
 	ComponentTimerBuilder             = component("timer-builder")
 	ComponentReplicatorQueue          = component("replicator-queue-processor")
 	ComponentShardController          = component("shard-controller")
@@ -126,6 +133,7 @@ var (
 	ComponentBatcher                  = component("batcher")
 	ComponentWorker                   = component("worker")
 	ComponentWorkerManager            = component("worker-manager")
+	ComponentPerNSWorkerManager       = component("perns-worker-manager")
 	ComponentServiceResolver          = component("service-resolver")
 	ComponentMetadataInitializer      = component("metadata-initializer")
 	ComponentAddSearchAttributes      = component("add-search-attributes")

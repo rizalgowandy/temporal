@@ -24,15 +24,12 @@
 
 package tasks
 
-import (
-	"go.temporal.io/server/common"
-)
-
-//go:generate mockgen -copyright_file ../../LICENSE -package $GOPACKAGE -source $GOFILE -destination scheduler_mock.go
 type (
-	// Scheduler is the generic interface for scheduling & processing tasks with priority
-	Scheduler interface {
-		common.Daemon
-		Submit(task PriorityTask)
+	// Scheduler is the generic interface for scheduling & processing tasks
+	Scheduler[T Task] interface {
+		Submit(task T)
+		TrySubmit(task T) bool
+		Start()
+		Stop()
 	}
 )

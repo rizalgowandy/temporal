@@ -28,6 +28,7 @@ import (
 	"context"
 	"database/sql"
 
+	"github.com/jmoiron/sqlx"
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/resolver"
 )
@@ -74,12 +75,13 @@ type (
 		HistoryExecutionSignal
 		HistoryExecutionSignalRequest
 
+		HistoryImmediateTask
+		HistoryScheduledTask
 		HistoryTransferTask
 		HistoryTimerTask
 		HistoryReplicationTask
 		HistoryReplicationDLQTask
 		HistoryVisibilityTask
-		HistoryTieredStorageTask
 	}
 
 	// AdminCRUD defines admin operations for CLI and test suites
@@ -109,6 +111,7 @@ type (
 
 		BeginTx(ctx context.Context) (Tx, error)
 		PluginName() string
+		DbName() string
 		IsDupEntryError(err error) bool
 		Close() error
 	}
@@ -129,5 +132,6 @@ type (
 		NamedExecContext(ctx context.Context, query string, arg interface{}) (sql.Result, error)
 		GetContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
 		SelectContext(ctx context.Context, dest interface{}, query string, args ...interface{}) error
+		PrepareNamedContext(ctx context.Context, query string) (*sqlx.NamedStmt, error)
 	}
 )

@@ -25,6 +25,7 @@
 package workflow
 
 import (
+	"context"
 	"math"
 	"time"
 
@@ -36,12 +37,15 @@ import (
 	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
+	"golang.org/x/exp/slices"
 
+	"go.temporal.io/server/api/clock/v1"
 	"go.temporal.io/server/api/historyservice/v1"
 	workflowspb "go.temporal.io/server/api/workflow/v1"
+	"go.temporal.io/server/common"
 	"go.temporal.io/server/common/backoff"
-	"go.temporal.io/server/common/namespace"
 	"go.temporal.io/server/common/primitives/timestamp"
+	"go.temporal.io/server/common/worker_versioning"
 )
 
 // TODO treat 0 as 0, not infinite
@@ -96,7 +100,7 @@ func getBackoffInterval(
 		interval = *maxInterval
 	} else if maxInterval == nil && interval <= 0 {
 		return backoff.NoBackoff, enumspb.RETRY_STATE_TIMEOUT
-	} else {
+		// } else {
 		// maxInterval != nil && (0 < interval && interval <= *maxInterval)
 		// or
 		// maxInterval == nil && interval > 0
@@ -118,8 +122,16 @@ func isRetryable(failure *failurepb.Failure, nonRetryableTypes []string) bool {
 	}
 
 	if failure.GetTimeoutFailureInfo() != nil {
-		return failure.GetTimeoutFailureInfo().GetTimeoutType() == enumspb.TIMEOUT_TYPE_START_TO_CLOSE ||
-			failure.GetTimeoutFailureInfo().GetTimeoutType() == enumspb.TIMEOUT_TYPE_HEARTBEAT
+		timeoutType := failure.GetTimeoutFailureInfo().GetTimeoutType()
+		if timeoutType == enumspb.TIMEOUT_TYPE_START_TO_CLOSE ||
+			timeoutType == enumspb.TIMEOUT_TYPE_HEARTBEAT {
+			return !slices.Contains(
+				nonRetryableTypes,
+				common.TimeoutFailureTypePrefix+timeoutType.String(),
+			)
+		}
+
+		return false
 	}
 
 	if failure.GetServerFailureInfo() != nil {
@@ -131,12 +143,10 @@ func isRetryable(failure *failurepb.Failure, nonRetryableTypes []string) bool {
 			return false
 		}
 
-		failureType := failure.GetApplicationFailureInfo().GetType()
-		for _, nrt := range nonRetryableTypes {
-			if nrt == failureType {
-				return false
-			}
-		}
+		return !slices.Contains(
+			nonRetryableTypes,
+			failure.GetApplicationFailureInfo().GetType(),
+		)
 	}
 	return true
 }
@@ -144,6 +154,7 @@ func isRetryable(failure *failurepb.Failure, nonRetryableTypes []string) bool {
 // Helpers for creating new retry/cron workflows:
 
 func SetupNewWorkflowForRetryOrCron(
+	ctx context.Context,
 	previousMutableState MutableState,
 	newMutableState MutableState,
 	newRunID string,
@@ -165,7 +176,9 @@ func SetupNewWorkflowForRetryOrCron(
 				WorkflowId: previousExecutionInfo.ParentWorkflowId,
 				RunId:      previousExecutionInfo.ParentRunId,
 			},
-			InitiatedId: previousExecutionInfo.InitiatedId,
+			InitiatedId:      previousExecutionInfo.ParentInitiatedId,
+			InitiatedVersion: previousExecutionInfo.ParentInitiatedVersion,
+			Clock:            previousExecutionInfo.ParentClock,
 		}
 	}
 
@@ -174,7 +187,7 @@ func SetupNewWorkflowForRetryOrCron(
 		RunId:      newRunID,
 	}
 
-	firstRunID, err := previousMutableState.GetFirstRunID()
+	firstRunID, err := previousMutableState.GetFirstRunID(ctx)
 	if err != nil {
 		return err
 	}
@@ -229,15 +242,24 @@ func SetupNewWorkflowForRetryOrCron(
 		attempt = previousExecutionInfo.Attempt + 1
 	}
 
+	// For retry: propagate build-id version info to new workflow.
+	// For cron: do not propagate (always start on latest version).
+	var sourceVersionStamp *commonpb.WorkerVersionStamp
+	if initiator == enumspb.CONTINUE_AS_NEW_INITIATOR_RETRY {
+		sourceVersionStamp = worker_versioning.StampIfUsingVersioning(previousMutableState.GetWorkerVersionStamp())
+	}
+
 	req := &historyservice.StartWorkflowExecutionRequest{
-		NamespaceId:              newMutableState.GetNamespaceEntry().ID().String(),
-		StartRequest:             createRequest,
-		ParentExecutionInfo:      parentInfo,
-		LastCompletionResult:     lastCompletionResult,
-		ContinuedFailure:         failure,
-		ContinueAsNewInitiator:   initiator,
-		FirstWorkflowTaskBackoff: timestamp.DurationPtr(backoffInterval),
+		NamespaceId:            newMutableState.GetNamespaceEntry().ID().String(),
+		StartRequest:           createRequest,
+		ParentExecutionInfo:    parentInfo,
+		LastCompletionResult:   lastCompletionResult,
+		ContinuedFailure:       failure,
+		ContinueAsNewInitiator: initiator,
+		// enforce minimal interval between runs to prevent tight loop continue as new spin.
+		FirstWorkflowTaskBackoff: previousMutableState.ContinueAsNewMinBackoff(&backoffInterval),
 		Attempt:                  attempt,
+		SourceVersionStamp:       sourceVersionStamp,
 	}
 	workflowTimeoutTime := timestamp.TimeValue(previousExecutionInfo.WorkflowExecutionExpirationTime)
 	if !workflowTimeoutTime.IsZero() {
@@ -247,7 +269,6 @@ func SetupNewWorkflowForRetryOrCron(
 	event, err := newMutableState.AddWorkflowExecutionStartedEventWithOptions(
 		newExecution,
 		req,
-		namespace.ID(parentInfo.GetNamespaceId()),
 		previousExecutionInfo.AutoResetPoints,
 		previousMutableState.GetExecutionState().GetRunId(),
 		firstRunID,
@@ -255,7 +276,11 @@ func SetupNewWorkflowForRetryOrCron(
 	if err != nil {
 		return serviceerror.NewInternal("Failed to add workflow execution started event.")
 	}
-	if err = newMutableState.AddFirstWorkflowTaskScheduled(event); err != nil {
+	var parentClock *clock.VectorClock
+	if parentInfo != nil {
+		parentClock = parentInfo.Clock
+	}
+	if _, err = newMutableState.AddFirstWorkflowTaskScheduled(parentClock, event, false); err != nil {
 		return err
 	}
 

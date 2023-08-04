@@ -28,14 +28,14 @@ import (
 	"context"
 	"crypto/tls"
 	"math/rand"
+	"net"
 	"strings"
-
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/peer"
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/examples/helloworld/helloworld"
+	"google.golang.org/grpc/peer"
 
 	"go.temporal.io/server/common/config"
 	"go.temporal.io/server/common/convert"
@@ -53,6 +53,7 @@ type ServerUsageType int32
 const (
 	Frontend ServerUsageType = iota
 	Internode
+	RemoteCluster
 )
 
 const (
@@ -84,7 +85,7 @@ var (
 	}
 )
 
-func startHelloWorldServer(s suite.Suite, factory *TestFactory) (*grpc.Server, string) {
+func startHelloWorldServer(s *suite.Suite, factory *TestFactory) (*grpc.Server, string) {
 	var opts []grpc.ServerOption
 	var err error
 	if factory.serverUsage == Internode {
@@ -103,13 +104,13 @@ func startHelloWorldServer(s suite.Suite, factory *TestFactory) (*grpc.Server, s
 	port := strings.Split(listener.Addr().String(), ":")[1]
 	s.NoError(err)
 	go func() {
-		err := server.Serve(listener)
-		s.NoError(err)
+		err = server.Serve(listener)
 	}()
+	s.NoError(err)
 	return server, port
 }
 
-func runHelloWorldTest(s suite.Suite, host string, serverFactory *TestFactory, clientFactory *TestFactory, isValid bool) {
+func runHelloWorldTest(s *suite.Suite, host string, serverFactory *TestFactory, clientFactory *TestFactory, isValid bool) {
 	server, port := startHelloWorldServer(s, serverFactory)
 	defer server.Stop()
 	err := dialHello(s, host+":"+port, clientFactory, serverFactory.serverUsage)
@@ -122,12 +123,13 @@ func runHelloWorldTest(s suite.Suite, host string, serverFactory *TestFactory, c
 }
 
 func runHelloWorldMultipleDials(
-	s suite.Suite,
+	s *suite.Suite,
 	host string,
 	serverFactory *TestFactory,
 	clientFactory *TestFactory,
 	nDials int,
-	validator func(*credentials.TLSInfo, error)) {
+	validator func(*credentials.TLSInfo, error),
+) {
 
 	server, port := startHelloWorldServer(s, serverFactory)
 	defer server.Stop()
@@ -138,43 +140,38 @@ func runHelloWorldMultipleDials(
 	}
 }
 
-func runHelloWorldWithRefresh(
-	s suite.Suite,
-	host string,
-	serverFactory *TestFactory,
-	clientFactory *TestFactory,
-	validator func(*credentials.TLSInfo, error)) {
-
-	server, port := startHelloWorldServer(s, serverFactory)
-	defer server.Stop()
-
-	tlsInfo, err := dialHelloAndGetTLSInfo(s, host+":"+port, clientFactory, serverFactory.serverUsage)
-	validator(tlsInfo, err)
-}
-
-func dialHello(s suite.Suite, hostport string, clientFactory *TestFactory, serverType ServerUsageType) error {
+func dialHello(s *suite.Suite, hostport string, clientFactory *TestFactory, serverType ServerUsageType) error {
 	_, err := dialHelloAndGetTLSInfo(s, hostport, clientFactory, serverType)
 	return err
 }
 
 func dialHelloAndGetTLSInfo(
-	s suite.Suite,
+	s *suite.Suite,
 	hostport string,
 	clientFactory *TestFactory,
-	serverType ServerUsageType) (*credentials.TLSInfo, error) {
+	serverType ServerUsageType,
+) (*credentials.TLSInfo, error) {
 
 	logger := log.NewNoopLogger()
 	var cfg *tls.Config
 	var err error
-	if serverType == Internode {
+	switch serverType {
+	case Internode:
 		cfg, err = clientFactory.GetInternodeClientTlsConfig()
-	} else {
+		s.NoError(err)
+	case Frontend:
 		cfg, err = clientFactory.GetFrontendClientTlsConfig()
+		s.NoError(err)
+	case RemoteCluster:
+		host, _, err := net.SplitHostPort(hostport)
+		s.NoError(err)
+		cfg, err = clientFactory.GetRemoteClusterClientConfig(host)
+		s.NoError(err)
 	}
 
-	s.NoError(err)
 	clientConn, err := rpc.Dial(hostport, cfg, logger)
 	s.NoError(err)
+
 	client := helloworld.NewGreeterClient(clientConn)
 
 	request := &helloworld.HelloRequest{Name: convert.Uint64ToString(rand.Uint64())}
@@ -190,16 +187,4 @@ func dialHelloAndGetTLSInfo(
 
 	_ = clientConn.Close()
 	return &tlsInfo, err
-}
-
-func certFilePath(dir string) string {
-	return dir + "/cert_pub.pem"
-}
-
-func keyFilePath(dir string) string {
-	return dir + "/cert_priv.pem"
-}
-
-func caFilePath(dir string) string {
-	return dir + "/ca_pub.pem"
 }

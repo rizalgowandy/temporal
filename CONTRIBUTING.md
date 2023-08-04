@@ -6,12 +6,17 @@ This doc is for contributors to Temporal Server (hopefully that's you!)
 ## Prerequisites
 
 ### Build prerequisites 
-* [Go Lang](https://golang.org/) (minimum version required is 1.17):
+* [Go Lang](https://golang.org/) (minimum version required is 1.19):
   - Install on macOS with `brew install go`.
   - Install on Ubuntu with `sudo apt install golang`.
 * [Protocol buffers compiler](https://github.com/protocolbuffers/protobuf/) (only if you are going to change `proto` files):
   - Install on macOS with `brew install protobuf`.
-  - Install on Ubuntu with `sudo apt install protobuf-compiler`.
+  - Download all other versions from [protoc release page](https://github.com/protocolbuffers/protobuf/releases).
+* [Temporal CLI tctl](https://github.com/temporalio/tctl)
+  - Homebrew `brew install tctl`
+  - Go install `make update-tctl`
+  - Or download it from here https://github.com/temporalio/tctl
+
 
 ### Runtime (server and tests) prerequisites
 * [docker](https://docs.docker.com/engine/install/)
@@ -45,7 +50,12 @@ make bins
 Please check the top of our [Makefile](Makefile) for other useful build targets.
 
 ## Run tests
-Tests require runtime dependencies. They can be run with `start-dependencies` target (uses `docker-compose` internally). Open new terminal window and run:
+We defined three categories of tests.
+* Unit test: Those tests should not have dependencies other than the test target and go mock. We should have unit test coverage as much as possible.
+* Integration test: Those tests cover the integration between the server and the dependencies (Cassandra, SQL, ES etc.). 
+* Functional test: Those tests cover the E2E functionality of Temporal server. They are all under ./tests directory.
+
+Integration and functional tests require runtime dependencies. They can be run with `start-dependencies` target (uses `docker-compose` internally). Open new terminal window and run:
 ```bash
 make start-dependencies
 ```
@@ -63,6 +73,11 @@ make unit-test
 Run all integration tests:
 ```bash
 make integration-test
+```
+
+Run all functional tests:
+```bash
+make functional-test
 ```
 
 Or run all the tests at once:
@@ -101,15 +116,54 @@ make start
 
 Now you can create default namespace with `tctl`:
 ```bash
-make tctl
-./tctl --ns default namespace register
+tctl --namespace default namespace register
 ```
-and run samples from [Go](https://github.com/temporalio/samples-go) and [Java](https://github.com/temporalio/samples-java) samples repos. Also, you can access web UI at `localhost:8088`.
+and run samples from [Go](https://github.com/temporalio/samples-go) and [Java](https://github.com/temporalio/samples-java) samples repos. Also, you can access web UI at `localhost:8080`.
 
 When you are done, press `Ctrl+C` to stop the server. Don't forget to stop dependencies (with `Ctrl+C`) and clean up resources:
 ```bash
 make stop-dependencies
 ```
+
+## Working with pending API changes
+If you need to make changes to the gRPC definitions while also working on code in this repo, do the following:
+
+1. Checkout [api](https://github.com/temporalio/api), [api-go](https://github.com/temporalio/api-go), and [sdk-go](https://github.com/temporalio/sdk-go)
+2. Make your changes to `api`, commit to a branch.
+3. In your copy of `api-go`:
+   1. Initialize submodules: `git submodule update --init --recursive`
+   2. Point api submodule at your branch. If you make more commits to the api repo, run the last command again.
+      ```bash
+      git submodule set-url proto/api ../api
+      git submodule set-branch --branch mystuff proto/api
+      git submodule update --remote proto/api
+      ```
+   3. Compile protos: `make proto`
+4. In your copy of `sdk-go`:
+    1. Point `go.mod` at local `api-go`:
+       ```
+       replace (
+           go.temporal.io/api => ../api-go
+       )
+        ```
+    2. Compile & fix errors: `make bins`
+5. In this repo:
+    1. Initialize submodules: `git submodule update --init --recursive`
+    2. Point api submodule at your branch. If you make more commits to the api repo, run the last command again.
+       ```bash
+       git submodule set-url proto/api ../api
+       git submodule set-branch --branch mystuff proto/api
+       git submodule update --remote proto/api
+       ```
+    3. Stage the change: `git add -u` (otherwise makefile will blow it away)
+    4. Point `go.mod` at local `api-go` and `sdk-go`:
+       ```
+       replace (
+           go.temporal.io/api => ../api-go
+           go.temporal.io/sdk => ../sdk-go
+       )
+        ```
+    5. Build & fix errors: `make proto && make bins`
 
 ## Licence headers
 This project is Open Source Software, and requires a header at the beginning of

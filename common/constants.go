@@ -27,6 +27,8 @@ package common
 import (
 	"math"
 	"time"
+
+	"go.temporal.io/server/common/debug"
 )
 
 const (
@@ -55,35 +57,10 @@ const (
 )
 
 const (
-	// FrontendServiceName is the name of the frontend service
-	FrontendServiceName = "frontend"
-	// HistoryServiceName is the name of the history service
-	HistoryServiceName = "history"
-	// MatchingServiceName is the name of the matching service
-	MatchingServiceName = "matching"
-	// WorkerServiceName is the name of the worker service
-	WorkerServiceName = "worker"
-)
-
-const (
 	// GetHistoryMaxPageSize is the max page size for get history
 	GetHistoryMaxPageSize = 256
 	// ReadDLQMessagesPageSize is the max page size for read DLQ messages
 	ReadDLQMessagesPageSize = 1000
-)
-
-// This was flagged by salus as potentially hardcoded credentials. This is a false positive by the scanner and should be
-// disregarded.
-// #nosec
-const (
-	// SystemGlobalNamespace is global namespace name for temporal system workflows running globally
-	SystemGlobalNamespace = "temporal-system-global"
-	// SystemLocalNamespace is namespace name for temporal system workflows running in local cluster
-	SystemLocalNamespace = "temporal-system"
-	// SystemNamespaceID is namespace id for all temporal system workflows
-	SystemNamespaceID = "32049b68-7872-4094-8e63-d0dd59896a83"
-	// SystemNamespaceRetention is retention config for all temporal system workflows
-	SystemNamespaceRetention = time.Hour * 24 * 7
 )
 
 const (
@@ -93,15 +70,11 @@ const (
 	// CriticalLongPollTimeout is a threshold for the context timeout passed into long poll API,
 	// below which a warning will be logged
 	CriticalLongPollTimeout = time.Second * 20
-	// MaxWorkflowRetentionPeriod is the maximum of workflow retention when registering namespace
-	// !!! Do NOT simply decrease this number, because it is being used by history scavenger to avoid race condition against history archival.
-	// Check more details in history scanner(scavenger)
-	MaxWorkflowRetentionPeriod = 30 * time.Hour * 24
 )
 
 const (
 	// DefaultWorkflowTaskTimeout sets the Default Workflow Task timeout for a Workflow
-	DefaultWorkflowTaskTimeout = 10 * time.Second
+	DefaultWorkflowTaskTimeout = 10 * time.Second * debug.TimeoutMultiplier
 
 	// MaxWorkflowTaskStartToCloseTimeout sets the Max Workflow Task start to close timeout for a Workflow
 	MaxWorkflowTaskStartToCloseTimeout = 120 * time.Second
@@ -110,4 +83,27 @@ const (
 const (
 	// DefaultTransactionSizeLimit is the largest allowed transaction size to persistence
 	DefaultTransactionSizeLimit = 4 * 1024 * 1024
+)
+
+const (
+	// TimeoutFailureTypePrefix is the prefix for timeout failure types
+	// used in retry policy
+	// the actual failure type will be prefix + enums.TimeoutType.String()
+	// e.g. "TemporalTimeout:StartToClose" or "TemporalTimeout:Heartbeat"
+	TimeoutFailureTypePrefix = "TemporalTimeout:"
+)
+
+const (
+	// Limit for schedule notes field
+	ScheduleNotesSizeLimit = 1000
+)
+
+const (
+	// DefaultQueueReaderID is the default readerID when loading history tasks
+	DefaultQueueReaderID int64 = 0
+)
+
+const (
+	// DefaultOperatorRPSRatio is the default percentage of rate limit that should be used for operator priority requests
+	DefaultOperatorRPSRatio float64 = 0.2
 )

@@ -27,14 +27,35 @@
 package sqlite
 
 import (
-	"github.com/mattn/go-sqlite3"
+	"errors"
+	"regexp"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 const (
-	goSqlDriverName = "sqlite3"
+	goSqlDriverName       = "sqlite"
+	sqlConstraintCodes    = sqlite3.SQLITE_CONSTRAINT | sqlite3.SQLITE_CONSTRAINT_PRIMARYKEY | sqlite3.SQLITE_CONSTRAINT_UNIQUE
+	sqlTableExistsPattern = "SQL logic error: table .* already exists \\(1\\)"
 )
 
-func (mdb *db) IsDupEntryError(err error) bool {
-	sqlErr, ok := err.(sqlite3.Error)
-	return ok && sqlErr.Code == sqlite3.ErrConstraint
+var sqlTableExistsRegex = regexp.MustCompile(sqlTableExistsPattern)
+
+func (*db) IsDupEntryError(err error) bool {
+	var sqlErr *sqlite.Error
+	if errors.As(err, &sqlErr) {
+		return sqlErr.Code()&sqlConstraintCodes != 0
+	}
+
+	return false
+}
+
+func isTableExistsError(err error) bool {
+	var sqlErr *sqlite.Error
+	if errors.As(err, &sqlErr) {
+		return sqlTableExistsRegex.MatchString(sqlErr.Error())
+	}
+
+	return false
 }

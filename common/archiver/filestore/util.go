@@ -25,7 +25,6 @@
 package filestore
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,6 +36,7 @@ import (
 	"github.com/dgryski/go-farm"
 	"github.com/gogo/protobuf/proto"
 	historypb "go.temporal.io/api/history/v1"
+	"go.uber.org/multierr"
 
 	archiverspb "go.temporal.io/server/api/archiver/v1"
 	"go.temporal.io/server/common/archiver"
@@ -111,7 +111,7 @@ func readFile(filepath string) ([]byte, error) {
 	return os.ReadFile(filepath)
 }
 
-func listFiles(dirPath string) ([]string, error) {
+func listFiles(dirPath string) (fileNames []string, err error) {
 	if info, err := os.Stat(dirPath); err != nil {
 		return nil, err
 	} else if !info.IsDir() {
@@ -122,12 +122,10 @@ func listFiles(dirPath string) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	fileNames, err := f.Readdirnames(-1)
-	f.Close()
-	if err != nil {
-		return nil, err
-	}
-	return fileNames, nil
+	defer func() {
+		err = multierr.Combine(err, f.Close())
+	}()
+	return f.Readdirnames(-1)
 }
 
 func listFilesByPrefix(dirPath string, prefix string) ([]string, error) {
@@ -249,13 +247,4 @@ func historyMutated(request *archiver.ArchiveHistoryRequest, historyBatches []*h
 	}
 	lastEventID := lastEvent.GetEventId()
 	return lastFailoverVersion != request.CloseFailoverVersion || lastEventID+1 != request.NextEventID
-}
-
-func contextExpired(ctx context.Context) bool {
-	select {
-	case <-ctx.Done():
-		return true
-	default:
-		return false
-	}
 }

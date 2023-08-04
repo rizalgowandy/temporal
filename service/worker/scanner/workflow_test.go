@@ -34,13 +34,13 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/workflow"
+	"go.temporal.io/server/common/primitives"
 
 	"go.temporal.io/sdk/testsuite"
 	"go.temporal.io/sdk/worker"
 
-	"go.temporal.io/server/common/metrics"
 	p "go.temporal.io/server/common/persistence"
-	"go.temporal.io/server/common/resource"
+	"go.temporal.io/server/common/resourcetest"
 )
 
 type scannerWorkflowTestSuite struct {
@@ -77,13 +77,13 @@ func (s *scannerWorkflowTestSuite) TestScavengerActivity() {
 	s.registerActivities(env)
 	controller := gomock.NewController(s.T())
 	defer controller.Finish()
-	mockResource := resource.NewTest(controller, metrics.Worker)
+	mockResource := resourcetest.NewTest(controller, primitives.WorkerService)
 
-	mockResource.TaskMgr.EXPECT().ListTaskQueue(gomock.Any()).Return(&p.ListTaskQueueResponse{}, nil)
+	mockResource.TaskMgr.EXPECT().ListTaskQueue(gomock.Any(), gomock.Any()).Return(&p.ListTaskQueueResponse{}, nil)
+
 	ctx := scannerContext{
 		logger:           mockResource.GetLogger(),
-		sdkClient:        mockResource.GetSDKClient(),
-		metricsClient:    mockResource.GetMetricsClient(),
+		metricsHandler:   mockResource.GetMetricsHandler(),
 		executionManager: mockResource.GetExecutionManager(),
 		taskManager:      mockResource.GetTaskManager(),
 		historyClient:    mockResource.GetHistoryClient(),

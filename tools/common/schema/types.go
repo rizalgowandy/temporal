@@ -87,6 +87,8 @@ const (
 	CLIOptKeyspace = "keyspace"
 	// CLIOptDatabase is the cli option for database
 	CLIOptDatabase = "database"
+	// CLIOptDefaultDb is the cli option used as defaultdb to connect to
+	CLIOptDefaultDb = "defaultdb"
 	// CLIOptPluginName is the cli option for plugin name
 	CLIOptPluginName = "plugin"
 	// CLIOptConnectAttributes is the cli option for connect attributes (key/values via a url query string)
@@ -107,6 +109,12 @@ const (
 	CLIOptReplicationFactor = "replication-factor"
 	// CLIOptDatacenter is the cli option for NetworkTopologyStrategy datacenter
 	CLIOptDatacenter = "datacenter"
+	// CLIOptConsistency is the cli option for consistency settings
+	CLIOptConsistency = "consistency"
+	// CLIOptAddressTranslator is the cli option for address translator for Cassandra
+	CLIOptAddressTranslator = "address-translator"
+	// CLIOptAddressTranslatorOptions is the cli option for options for address translator
+	CLIOptAddressTranslatorOptions = "address-translator-options"
 	// CLIOptQuiet is the cli option for quiet mode
 	CLIOptQuiet = "quiet"
 	// CLIOptForce is the cli option for force mode
@@ -146,10 +154,16 @@ const (
 	CLIFlagReplicationFactor = CLIOptReplicationFactor + ", rf"
 	// CLIFlagDatacenter is the cli option for NetworkTopologyStrategy datacenter
 	CLIFlagDatacenter = CLIOptDatacenter + ", dc"
+	// CLIFlagAddressTranslator is the cli option for address translator for Cassandra
+	CLIFlagAddressTranslator = CLIOptAddressTranslator + ", at"
+	// CLIFlagAddressTranslatorOptions is the cli option for address translator of Cassandra
+	CLIFlagAddressTranslatorOptions
 	// CLIFlagQuiet is the cli flag for quiet mode
 	CLIFlagQuiet = CLIOptQuiet + ", q"
 	// CLIFlagForce is the cli flag for force mode
 	CLIFlagForce = CLIOptForce + ", f"
+	// CLIFlagDisableInitialHostLookup is the cli flag for only using supplied hosts to connect to the database
+	CLIFlagDisableInitialHostLookup = "disable-initial-host-lookup"
 
 	// CLIFlagEnableTLS enables cassandra client TLS
 	CLIFlagEnableTLS = "tls"

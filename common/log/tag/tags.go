@@ -26,11 +26,13 @@ package tag
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	enumspb "go.temporal.io/api/enums/v1"
 
 	enumsspb "go.temporal.io/server/api/enums/v1"
+	"go.temporal.io/server/common/primitives"
 	"go.temporal.io/server/common/primitives/timestamp"
 )
 
@@ -42,9 +44,14 @@ import (
 //   2. System : these tags are internal information which usually cannot be understood by our customers,
 
 // LoggingCallAtKey is reserved tag
-const LoggingCallAtKey = "logging-call-at"
+const (
+	LoggingCallAtKey = "logging-call-at"
 
-///////////////////  Common tags defined here ///////////////////
+	getType     = "%T"
+	errorPrefix = "*"
+)
+
+// ==========  Common tags defined here ==========
 
 // Operation returns tag for Operation
 func Operation(operation string) ZapTag {
@@ -54,6 +61,11 @@ func Operation(operation string) ZapTag {
 // Error returns tag for Error
 func Error(err error) ZapTag {
 	return NewErrorTag(err)
+}
+
+// ErrorType returns tag for ErrorType
+func ErrorType(err error) ZapTag {
+	return NewStringTag("service-error-type", strings.TrimPrefix(fmt.Sprintf(getType, err), errorPrefix))
 }
 
 // IsRetryable returns tag for IsRetryable
@@ -71,12 +83,12 @@ func Timestamp(timestamp time.Time) ZapTag {
 	return NewTimeTag("timestamp", timestamp)
 }
 
-// Timestamp returns tag for Timestamp
+// TimestampPtr returns tag for TimestampPtr
 func TimestampPtr(t *time.Time) ZapTag {
 	return NewTimeTag("timestamp", timestamp.TimeValue(t))
 }
 
-///////////////////  Workflow tags defined here: ( wf is short for workflow) ///////////////////
+// ==========  Workflow tags defined here: ( wf is short for workflow) ==========
 
 // WorkflowAction returns tag for WorkflowAction
 func workflowAction(action string) ZapTag {
@@ -204,17 +216,17 @@ func WorkflowEventID(eventID int64) ZapTag {
 	return NewInt64("wf-history-event-id", eventID)
 }
 
-// WorkflowScheduleID returns tag for WorkflowScheduleID
-func WorkflowScheduleID(scheduleID int64) ZapTag {
-	return NewInt64("wf-schedule-id", scheduleID)
+// WorkflowScheduledEventID returns tag for WorkflowScheduledEventID
+func WorkflowScheduledEventID(scheduledEventID int64) ZapTag {
+	return NewInt64("wf-scheduled-event-id", scheduledEventID)
 }
 
-// WorkflowStartedID returns tag for WorkflowStartedID
-func WorkflowStartedID(id int64) ZapTag {
-	return NewInt64("wf-started-id", id)
+// WorkflowStartedEventID returns tag for WorkflowStartedEventID
+func WorkflowStartedEventID(startedEventID int64) ZapTag {
+	return NewInt64("wf-started-event-id", startedEventID)
 }
 
-// WorkflowStartedID returns tag for WorkflowStartedTimestamp
+// WorkflowStartedTimestamp returns tag for WorkflowStartedTimestamp
 func WorkflowStartedTimestamp(t *time.Time) ZapTag {
 	return NewTimePtrTag("wf-started-timestamp", t)
 }
@@ -250,6 +262,11 @@ func WorkflowResetNextEventID(resetNextEventID int64) ZapTag {
 }
 
 // history tree
+
+// WorkflowBranchToken returns tag for WorkflowBranchToken
+func WorkflowBranchToken(branchToken []byte) ZapTag {
+	return NewBinaryTag("wf-branch-token", branchToken)
+}
 
 // WorkflowTreeID returns tag for WorkflowTreeID
 func WorkflowTreeID(treeID string) ZapTag {
@@ -290,6 +307,11 @@ func WorkflowTaskQueueName(taskQueueName string) ZapTag {
 
 // size limit
 
+// BlobSize returns tag for BlobSize
+func BlobSize(blobSize int64) ZapTag {
+	return NewInt64("blob-size", blobSize)
+}
+
 // WorkflowSize returns tag for WorkflowSize
 func WorkflowSize(workflowSize int64) ZapTag {
 	return NewInt64("wf-size", workflowSize)
@@ -310,12 +332,22 @@ func WorkflowHistorySizeBytes(historySizeBytes int) ZapTag {
 	return NewInt("wf-history-size-bytes", historySizeBytes)
 }
 
+// WorkflowMutableStateSize returns tag for MutableStateSize
+func WorkflowMutableStateSize(mutableStateSize int) ZapTag {
+	return NewInt("wf-mutable-state-size", mutableStateSize)
+}
+
 // WorkflowEventCount returns tag for EventCount
 func WorkflowEventCount(eventCount int) ZapTag {
 	return NewInt("wf-event-count", eventCount)
 }
 
-///////////////////  System tags defined here:  ///////////////////
+// ScheduleID returns tag for ScheduleID
+func ScheduleID(scheduleID string) ZapTag {
+	return NewStringTag("schedule-id", scheduleID)
+}
+
+// ==========  System tags defined here:  ==========
 // Tags with pre-define values
 
 // Component returns tag for Component
@@ -351,8 +383,8 @@ func shardupdate(shardupdate string) ZapTag {
 // general
 
 // Service returns tag for Service
-func Service(sv string) ZapTag {
-	return NewStringTag("service", sv)
+func Service(sv primitives.ServiceName) ZapTag {
+	return NewStringTag("service", string(sv))
 }
 
 // Addresses returns tag for Addresses
@@ -445,6 +477,11 @@ func RequestCount(c int) ZapTag {
 	return NewInt("request-count", c)
 }
 
+// RPS returns tag for requests per second
+func RPS(c int64) ZapTag {
+	return NewInt64("rps", c)
+}
+
 // Number returns tag for Number
 func Number(n int64) ZapTag {
 	return NewInt64("number", n)
@@ -470,6 +507,10 @@ func CertThumbprint(thumbprint string) ZapTag {
 	return NewStringTag("cert-thumbprint", thumbprint)
 }
 
+func WorkerComponent(v interface{}) ZapTag {
+	return NewStringTag("worker-component", fmt.Sprintf("%T", v))
+}
+
 // history engine shard
 
 // ShardID returns tag for ShardID
@@ -480,11 +521,6 @@ func ShardID(shardID int32) ZapTag {
 // ShardTime returns tag for ShardTime
 func ShardTime(shardTime interface{}) ZapTag {
 	return NewAnyTag("shard-time", shardTime)
-}
-
-// ShardReplicationAck returns tag for ShardReplicationAck
-func ShardReplicationAck(shardReplicationAck int64) ZapTag {
-	return NewInt64("shard-replication-ack", shardReplicationAck)
 }
 
 // PreviousShardRangeID returns tag for PreviousShardRangeID
@@ -503,8 +539,8 @@ func ShardContextState(state int) ZapTag {
 }
 
 // ShardContextStateRequest returns tag for ShardContextStateRequest
-func ShardContextStateRequest(r int) ZapTag {
-	return NewInt("shard-context-state-request", r)
+func ShardContextStateRequest(r string) ZapTag {
+	return NewStringTag("shard-context-state-request", r)
 }
 
 // ReadLevel returns tag for ReadLevel
@@ -522,17 +558,22 @@ func MaxLevel(lv int64) ZapTag {
 	return NewInt64("max-level", lv)
 }
 
-// ShardTransferAcks returns tag for ShardTransferAcks
-func ShardTransferAcks(shardTransferAcks interface{}) ZapTag {
-	return NewAnyTag("shard-transfer-acks", shardTransferAcks)
-}
-
-// ShardTimerAcks returns tag for ShardTimerAcks
-func ShardTimerAcks(shardTimerAcks interface{}) ZapTag {
-	return NewAnyTag("shard-timer-acks", shardTimerAcks)
+// ShardQueueAcks returns tag for shard queue ack levels
+func ShardQueueAcks(categoryName string, ackLevel interface{}) ZapTag {
+	return NewAnyTag("shard-"+categoryName+"-queue-acks", ackLevel)
 }
 
 // task queue processor
+
+// QueueReaderID returns tag for queue readerID
+func QueueReaderID(readerID int64) ZapTag {
+	return NewInt64("queue-reader-id", readerID)
+}
+
+// QueueAlert returns tag for queue alert
+func QueueAlert(alert interface{}) ZapTag {
+	return NewAnyTag("queue-alert", alert)
+}
 
 // Task returns tag for Task
 func Task(task interface{}) ZapTag {
@@ -547,6 +588,10 @@ func TaskID(taskID int64) ZapTag {
 // TaskVersion returns tag for TaskVersion
 func TaskVersion(taskVersion int64) ZapTag {
 	return NewInt64("queue-task-version", taskVersion)
+}
+
+func TaskType(taskType enumsspb.TaskType) ZapTag {
+	return NewStringTag("queue-task-type", taskType.String())
 }
 
 // TaskVisibilityTimestamp returns tag for task visibilityTimestamp
@@ -574,6 +619,10 @@ func TimerTaskStatus(timerTaskStatus int32) ZapTag {
 // Attempt returns tag for Attempt
 func Attempt(attempt int32) ZapTag {
 	return NewInt32("attempt", attempt)
+}
+
+func WorkflowTaskType(wtType string) ZapTag {
+	return NewStringTag("wt-type", wtType)
 }
 
 // AttemptCount returns tag for AttemptCount
@@ -661,7 +710,7 @@ func TokenLastEventID(id int64) ZapTag {
 	return NewInt64("token-last-event-id", id)
 }
 
-///////////////////  XDC tags defined here: xdc- ///////////////////
+// ==========  XDC tags defined here: xdc- ==========
 
 // SourceCluster returns tag for SourceCluster
 func SourceCluster(sourceCluster string) ZapTag {
@@ -708,7 +757,7 @@ func TokenLastEventVersion(version int64) ZapTag {
 	return NewInt64("xdc-token-last-event-version", version)
 }
 
-///////////////////  Archival tags defined here: archival- ///////////////////
+// ==========  Archival tags defined here: archival- ==========
 // archival request tags
 
 // ArchivalCallerServiceName returns tag for the service name calling archival client
@@ -872,4 +921,20 @@ func TLSCertFiles(filePaths []string) ZapTag {
 // Timeout returns tag for timeout
 func Timeout(timeoutValue string) ZapTag {
 	return NewStringTag("timeout", timeoutValue)
+}
+
+func DeletedExecutionsCount(count int) ZapTag {
+	return NewInt("deleted-executions-count", count)
+}
+
+func DeletedExecutionsErrorCount(count int) ZapTag {
+	return NewInt("delete-executions-error-count", count)
+}
+
+func Endpoint(endpoint string) ZapTag {
+	return NewStringTag("endpoint", endpoint)
+}
+
+func BuildId(buildId string) ZapTag {
+	return NewStringTag("build-id", buildId)
 }

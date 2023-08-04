@@ -38,6 +38,7 @@ import (
 	history "go.temporal.io/api/history/v1"
 	historyservice "go.temporal.io/server/api/historyservice/v1"
 	repication "go.temporal.io/server/api/replication/v1"
+	collection "go.temporal.io/server/common/collection"
 	namespace "go.temporal.io/server/common/namespace"
 	events "go.temporal.io/server/service/history/events"
 	tasks "go.temporal.io/server/service/history/tasks"
@@ -64,6 +65,48 @@ func NewMockEngine(ctrl *gomock.Controller) *MockEngine {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockEngine) EXPECT() *MockEngineMockRecorder {
 	return m.recorder
+}
+
+// AddSpeculativeWorkflowTaskTimeoutTask mocks base method.
+func (m *MockEngine) AddSpeculativeWorkflowTaskTimeoutTask(task *tasks.WorkflowTaskTimeoutTask) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "AddSpeculativeWorkflowTaskTimeoutTask", task)
+}
+
+// AddSpeculativeWorkflowTaskTimeoutTask indicates an expected call of AddSpeculativeWorkflowTaskTimeoutTask.
+func (mr *MockEngineMockRecorder) AddSpeculativeWorkflowTaskTimeoutTask(task interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddSpeculativeWorkflowTaskTimeoutTask", reflect.TypeOf((*MockEngine)(nil).AddSpeculativeWorkflowTaskTimeoutTask), task)
+}
+
+// ConvertReplicationTask mocks base method.
+func (m *MockEngine) ConvertReplicationTask(ctx context.Context, task tasks.Task) (*repication.ReplicationTask, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConvertReplicationTask", ctx, task)
+	ret0, _ := ret[0].(*repication.ReplicationTask)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConvertReplicationTask indicates an expected call of ConvertReplicationTask.
+func (mr *MockEngineMockRecorder) ConvertReplicationTask(ctx, task interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConvertReplicationTask", reflect.TypeOf((*MockEngine)(nil).ConvertReplicationTask), ctx, task)
+}
+
+// DeleteWorkflowExecution mocks base method.
+func (m *MockEngine) DeleteWorkflowExecution(ctx context.Context, deleteRequest *historyservice.DeleteWorkflowExecutionRequest) (*historyservice.DeleteWorkflowExecutionResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteWorkflowExecution", ctx, deleteRequest)
+	ret0, _ := ret[0].(*historyservice.DeleteWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// DeleteWorkflowExecution indicates an expected call of DeleteWorkflowExecution.
+func (mr *MockEngineMockRecorder) DeleteWorkflowExecution(ctx, deleteRequest interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteWorkflowExecution", reflect.TypeOf((*MockEngine)(nil).DeleteWorkflowExecution), ctx, deleteRequest)
 }
 
 // DescribeMutableState mocks base method.
@@ -186,6 +229,51 @@ func (mr *MockEngineMockRecorder) GetReplicationStatus(ctx, request interface{})
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReplicationStatus", reflect.TypeOf((*MockEngine)(nil).GetReplicationStatus), ctx, request)
 }
 
+// GetReplicationTasksIter mocks base method.
+func (m *MockEngine) GetReplicationTasksIter(ctx context.Context, pollingCluster string, minInclusiveTaskID, maxExclusiveTaskID int64) (collection.Iterator[tasks.Task], error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetReplicationTasksIter", ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID)
+	ret0, _ := ret[0].(collection.Iterator[tasks.Task])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetReplicationTasksIter indicates an expected call of GetReplicationTasksIter.
+func (mr *MockEngineMockRecorder) GetReplicationTasksIter(ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReplicationTasksIter", reflect.TypeOf((*MockEngine)(nil).GetReplicationTasksIter), ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID)
+}
+
+// IsActivityTaskValid mocks base method.
+func (m *MockEngine) IsActivityTaskValid(ctx context.Context, request *historyservice.IsActivityTaskValidRequest) (*historyservice.IsActivityTaskValidResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsActivityTaskValid", ctx, request)
+	ret0, _ := ret[0].(*historyservice.IsActivityTaskValidResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsActivityTaskValid indicates an expected call of IsActivityTaskValid.
+func (mr *MockEngineMockRecorder) IsActivityTaskValid(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsActivityTaskValid", reflect.TypeOf((*MockEngine)(nil).IsActivityTaskValid), ctx, request)
+}
+
+// IsWorkflowTaskValid mocks base method.
+func (m *MockEngine) IsWorkflowTaskValid(ctx context.Context, request *historyservice.IsWorkflowTaskValidRequest) (*historyservice.IsWorkflowTaskValidResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "IsWorkflowTaskValid", ctx, request)
+	ret0, _ := ret[0].(*historyservice.IsWorkflowTaskValidResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// IsWorkflowTaskValid indicates an expected call of IsWorkflowTaskValid.
+func (mr *MockEngineMockRecorder) IsWorkflowTaskValid(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "IsWorkflowTaskValid", reflect.TypeOf((*MockEngine)(nil).IsWorkflowTaskValid), ctx, request)
+}
+
 // MergeDLQMessages mocks base method.
 func (m *MockEngine) MergeDLQMessages(ctx context.Context, messagesRequest *historyservice.MergeDLQMessagesRequest) (*historyservice.MergeDLQMessagesResponse, error) {
 	m.ctrl.T.Helper()
@@ -213,52 +301,16 @@ func (mr *MockEngineMockRecorder) NotifyNewHistoryEvent(event interface{}) *gomo
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewHistoryEvent", reflect.TypeOf((*MockEngine)(nil).NotifyNewHistoryEvent), event)
 }
 
-// NotifyNewReplicationTasks mocks base method.
-func (m *MockEngine) NotifyNewReplicationTasks(tasks []tasks.Task) {
+// NotifyNewTasks mocks base method.
+func (m *MockEngine) NotifyNewTasks(tasks map[tasks.Category][]tasks.Task) {
 	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "NotifyNewReplicationTasks", tasks)
+	m.ctrl.Call(m, "NotifyNewTasks", tasks)
 }
 
-// NotifyNewReplicationTasks indicates an expected call of NotifyNewReplicationTasks.
-func (mr *MockEngineMockRecorder) NotifyNewReplicationTasks(tasks interface{}) *gomock.Call {
+// NotifyNewTasks indicates an expected call of NotifyNewTasks.
+func (mr *MockEngineMockRecorder) NotifyNewTasks(tasks interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewReplicationTasks", reflect.TypeOf((*MockEngine)(nil).NotifyNewReplicationTasks), tasks)
-}
-
-// NotifyNewTimerTasks mocks base method.
-func (m *MockEngine) NotifyNewTimerTasks(tasks []tasks.Task) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "NotifyNewTimerTasks", tasks)
-}
-
-// NotifyNewTimerTasks indicates an expected call of NotifyNewTimerTasks.
-func (mr *MockEngineMockRecorder) NotifyNewTimerTasks(tasks interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewTimerTasks", reflect.TypeOf((*MockEngine)(nil).NotifyNewTimerTasks), tasks)
-}
-
-// NotifyNewTransferTasks mocks base method.
-func (m *MockEngine) NotifyNewTransferTasks(tasks []tasks.Task) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "NotifyNewTransferTasks", tasks)
-}
-
-// NotifyNewTransferTasks indicates an expected call of NotifyNewTransferTasks.
-func (mr *MockEngineMockRecorder) NotifyNewTransferTasks(tasks interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewTransferTasks", reflect.TypeOf((*MockEngine)(nil).NotifyNewTransferTasks), tasks)
-}
-
-// NotifyNewVisibilityTasks mocks base method.
-func (m *MockEngine) NotifyNewVisibilityTasks(tasks []tasks.Task) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "NotifyNewVisibilityTasks", tasks)
-}
-
-// NotifyNewVisibilityTasks indicates an expected call of NotifyNewVisibilityTasks.
-func (mr *MockEngineMockRecorder) NotifyNewVisibilityTasks(tasks interface{}) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewVisibilityTasks", reflect.TypeOf((*MockEngine)(nil).NotifyNewVisibilityTasks), tasks)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "NotifyNewTasks", reflect.TypeOf((*MockEngine)(nil).NotifyNewTasks), tasks)
 }
 
 // PollMutableState mocks base method.
@@ -276,12 +328,28 @@ func (mr *MockEngineMockRecorder) PollMutableState(ctx, request interface{}) *go
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollMutableState", reflect.TypeOf((*MockEngine)(nil).PollMutableState), ctx, request)
 }
 
+// PollWorkflowExecutionUpdate mocks base method.
+func (m *MockEngine) PollWorkflowExecutionUpdate(ctx context.Context, request *historyservice.PollWorkflowExecutionUpdateRequest) (*historyservice.PollWorkflowExecutionUpdateResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "PollWorkflowExecutionUpdate", ctx, request)
+	ret0, _ := ret[0].(*historyservice.PollWorkflowExecutionUpdateResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// PollWorkflowExecutionUpdate indicates an expected call of PollWorkflowExecutionUpdate.
+func (mr *MockEngineMockRecorder) PollWorkflowExecutionUpdate(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PollWorkflowExecutionUpdate", reflect.TypeOf((*MockEngine)(nil).PollWorkflowExecutionUpdate), ctx, request)
+}
+
 // PurgeDLQMessages mocks base method.
-func (m *MockEngine) PurgeDLQMessages(ctx context.Context, messagesRequest *historyservice.PurgeDLQMessagesRequest) error {
+func (m *MockEngine) PurgeDLQMessages(ctx context.Context, messagesRequest *historyservice.PurgeDLQMessagesRequest) (*historyservice.PurgeDLQMessagesResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "PurgeDLQMessages", ctx, messagesRequest)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.PurgeDLQMessagesResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // PurgeDLQMessages indicates an expected call of PurgeDLQMessages.
@@ -319,6 +387,20 @@ func (mr *MockEngineMockRecorder) ReapplyEvents(ctx, namespaceUUID, workflowID, 
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReapplyEvents", reflect.TypeOf((*MockEngine)(nil).ReapplyEvents), ctx, namespaceUUID, workflowID, runID, events)
 }
 
+// RebuildMutableState mocks base method.
+func (m *MockEngine) RebuildMutableState(ctx context.Context, namespaceUUID namespace.ID, execution common.WorkflowExecution) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RebuildMutableState", ctx, namespaceUUID, execution)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// RebuildMutableState indicates an expected call of RebuildMutableState.
+func (mr *MockEngineMockRecorder) RebuildMutableState(ctx, namespaceUUID, execution interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "RebuildMutableState", reflect.TypeOf((*MockEngine)(nil).RebuildMutableState), ctx, namespaceUUID, execution)
+}
+
 // RecordActivityTaskHeartbeat mocks base method.
 func (m *MockEngine) RecordActivityTaskHeartbeat(ctx context.Context, request *historyservice.RecordActivityTaskHeartbeatRequest) (*historyservice.RecordActivityTaskHeartbeatResponse, error) {
 	m.ctrl.T.Helper()
@@ -350,11 +432,12 @@ func (mr *MockEngineMockRecorder) RecordActivityTaskStarted(ctx, request interfa
 }
 
 // RecordChildExecutionCompleted mocks base method.
-func (m *MockEngine) RecordChildExecutionCompleted(ctx context.Context, request *historyservice.RecordChildExecutionCompletedRequest) error {
+func (m *MockEngine) RecordChildExecutionCompleted(ctx context.Context, request *historyservice.RecordChildExecutionCompletedRequest) (*historyservice.RecordChildExecutionCompletedResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RecordChildExecutionCompleted", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.RecordChildExecutionCompletedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RecordChildExecutionCompleted indicates an expected call of RecordChildExecutionCompleted.
@@ -393,11 +476,12 @@ func (mr *MockEngineMockRecorder) RefreshWorkflowTasks(ctx, namespaceUUID, execu
 }
 
 // RemoveSignalMutableState mocks base method.
-func (m *MockEngine) RemoveSignalMutableState(ctx context.Context, request *historyservice.RemoveSignalMutableStateRequest) error {
+func (m *MockEngine) RemoveSignalMutableState(ctx context.Context, request *historyservice.RemoveSignalMutableStateRequest) (*historyservice.RemoveSignalMutableStateResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RemoveSignalMutableState", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.RemoveSignalMutableStateResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RemoveSignalMutableState indicates an expected call of RemoveSignalMutableState.
@@ -420,12 +504,27 @@ func (mr *MockEngineMockRecorder) ReplicateEventsV2(ctx, request interface{}) *g
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplicateEventsV2", reflect.TypeOf((*MockEngine)(nil).ReplicateEventsV2), ctx, request)
 }
 
-// RequestCancelWorkflowExecution mocks base method.
-func (m *MockEngine) RequestCancelWorkflowExecution(ctx context.Context, request *historyservice.RequestCancelWorkflowExecutionRequest) error {
+// ReplicateWorkflowState mocks base method.
+func (m *MockEngine) ReplicateWorkflowState(ctx context.Context, request *historyservice.ReplicateWorkflowStateRequest) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "RequestCancelWorkflowExecution", ctx, request)
+	ret := m.ctrl.Call(m, "ReplicateWorkflowState", ctx, request)
 	ret0, _ := ret[0].(error)
 	return ret0
+}
+
+// ReplicateWorkflowState indicates an expected call of ReplicateWorkflowState.
+func (mr *MockEngineMockRecorder) ReplicateWorkflowState(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReplicateWorkflowState", reflect.TypeOf((*MockEngine)(nil).ReplicateWorkflowState), ctx, request)
+}
+
+// RequestCancelWorkflowExecution mocks base method.
+func (m *MockEngine) RequestCancelWorkflowExecution(ctx context.Context, request *historyservice.RequestCancelWorkflowExecutionRequest) (*historyservice.RequestCancelWorkflowExecutionResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "RequestCancelWorkflowExecution", ctx, request)
+	ret0, _ := ret[0].(*historyservice.RequestCancelWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RequestCancelWorkflowExecution indicates an expected call of RequestCancelWorkflowExecution.
@@ -465,11 +564,12 @@ func (mr *MockEngineMockRecorder) ResetWorkflowExecution(ctx, request interface{
 }
 
 // RespondActivityTaskCanceled mocks base method.
-func (m *MockEngine) RespondActivityTaskCanceled(ctx context.Context, request *historyservice.RespondActivityTaskCanceledRequest) error {
+func (m *MockEngine) RespondActivityTaskCanceled(ctx context.Context, request *historyservice.RespondActivityTaskCanceledRequest) (*historyservice.RespondActivityTaskCanceledResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RespondActivityTaskCanceled", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.RespondActivityTaskCanceledResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RespondActivityTaskCanceled indicates an expected call of RespondActivityTaskCanceled.
@@ -479,11 +579,12 @@ func (mr *MockEngineMockRecorder) RespondActivityTaskCanceled(ctx, request inter
 }
 
 // RespondActivityTaskCompleted mocks base method.
-func (m *MockEngine) RespondActivityTaskCompleted(ctx context.Context, request *historyservice.RespondActivityTaskCompletedRequest) error {
+func (m *MockEngine) RespondActivityTaskCompleted(ctx context.Context, request *historyservice.RespondActivityTaskCompletedRequest) (*historyservice.RespondActivityTaskCompletedResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RespondActivityTaskCompleted", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.RespondActivityTaskCompletedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RespondActivityTaskCompleted indicates an expected call of RespondActivityTaskCompleted.
@@ -493,11 +594,12 @@ func (mr *MockEngineMockRecorder) RespondActivityTaskCompleted(ctx, request inte
 }
 
 // RespondActivityTaskFailed mocks base method.
-func (m *MockEngine) RespondActivityTaskFailed(ctx context.Context, request *historyservice.RespondActivityTaskFailedRequest) error {
+func (m *MockEngine) RespondActivityTaskFailed(ctx context.Context, request *historyservice.RespondActivityTaskFailedRequest) (*historyservice.RespondActivityTaskFailedResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "RespondActivityTaskFailed", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.RespondActivityTaskFailedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // RespondActivityTaskFailed indicates an expected call of RespondActivityTaskFailed.
@@ -565,11 +667,12 @@ func (mr *MockEngineMockRecorder) SignalWithStartWorkflowExecution(ctx, request 
 }
 
 // SignalWorkflowExecution mocks base method.
-func (m *MockEngine) SignalWorkflowExecution(ctx context.Context, request *historyservice.SignalWorkflowExecutionRequest) error {
+func (m *MockEngine) SignalWorkflowExecution(ctx context.Context, request *historyservice.SignalWorkflowExecutionRequest) (*historyservice.SignalWorkflowExecutionResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "SignalWorkflowExecution", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.SignalWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // SignalWorkflowExecution indicates an expected call of SignalWorkflowExecution.
@@ -617,6 +720,21 @@ func (mr *MockEngineMockRecorder) Stop() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Stop", reflect.TypeOf((*MockEngine)(nil).Stop))
 }
 
+// SubscribeReplicationNotification mocks base method.
+func (m *MockEngine) SubscribeReplicationNotification() (<-chan struct{}, string) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubscribeReplicationNotification")
+	ret0, _ := ret[0].(<-chan struct{})
+	ret1, _ := ret[1].(string)
+	return ret0, ret1
+}
+
+// SubscribeReplicationNotification indicates an expected call of SubscribeReplicationNotification.
+func (mr *MockEngineMockRecorder) SubscribeReplicationNotification() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubscribeReplicationNotification", reflect.TypeOf((*MockEngine)(nil).SubscribeReplicationNotification))
+}
+
 // SyncActivity mocks base method.
 func (m *MockEngine) SyncActivity(ctx context.Context, request *historyservice.SyncActivityRequest) error {
 	m.ctrl.T.Helper()
@@ -646,15 +764,152 @@ func (mr *MockEngineMockRecorder) SyncShardStatus(ctx, request interface{}) *gom
 }
 
 // TerminateWorkflowExecution mocks base method.
-func (m *MockEngine) TerminateWorkflowExecution(ctx context.Context, request *historyservice.TerminateWorkflowExecutionRequest) error {
+func (m *MockEngine) TerminateWorkflowExecution(ctx context.Context, request *historyservice.TerminateWorkflowExecutionRequest) (*historyservice.TerminateWorkflowExecutionResponse, error) {
 	m.ctrl.T.Helper()
 	ret := m.ctrl.Call(m, "TerminateWorkflowExecution", ctx, request)
-	ret0, _ := ret[0].(error)
-	return ret0
+	ret0, _ := ret[0].(*historyservice.TerminateWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
 }
 
 // TerminateWorkflowExecution indicates an expected call of TerminateWorkflowExecution.
 func (mr *MockEngineMockRecorder) TerminateWorkflowExecution(ctx, request interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "TerminateWorkflowExecution", reflect.TypeOf((*MockEngine)(nil).TerminateWorkflowExecution), ctx, request)
+}
+
+// UnsubscribeReplicationNotification mocks base method.
+func (m *MockEngine) UnsubscribeReplicationNotification(arg0 string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UnsubscribeReplicationNotification", arg0)
+}
+
+// UnsubscribeReplicationNotification indicates an expected call of UnsubscribeReplicationNotification.
+func (mr *MockEngineMockRecorder) UnsubscribeReplicationNotification(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnsubscribeReplicationNotification", reflect.TypeOf((*MockEngine)(nil).UnsubscribeReplicationNotification), arg0)
+}
+
+// UpdateWorkflowExecution mocks base method.
+func (m *MockEngine) UpdateWorkflowExecution(ctx context.Context, request *historyservice.UpdateWorkflowExecutionRequest) (*historyservice.UpdateWorkflowExecutionResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "UpdateWorkflowExecution", ctx, request)
+	ret0, _ := ret[0].(*historyservice.UpdateWorkflowExecutionResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// UpdateWorkflowExecution indicates an expected call of UpdateWorkflowExecution.
+func (mr *MockEngineMockRecorder) UpdateWorkflowExecution(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UpdateWorkflowExecution", reflect.TypeOf((*MockEngine)(nil).UpdateWorkflowExecution), ctx, request)
+}
+
+// VerifyChildExecutionCompletionRecorded mocks base method.
+func (m *MockEngine) VerifyChildExecutionCompletionRecorded(ctx context.Context, request *historyservice.VerifyChildExecutionCompletionRecordedRequest) (*historyservice.VerifyChildExecutionCompletionRecordedResponse, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyChildExecutionCompletionRecorded", ctx, request)
+	ret0, _ := ret[0].(*historyservice.VerifyChildExecutionCompletionRecordedResponse)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// VerifyChildExecutionCompletionRecorded indicates an expected call of VerifyChildExecutionCompletionRecorded.
+func (mr *MockEngineMockRecorder) VerifyChildExecutionCompletionRecorded(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyChildExecutionCompletionRecorded", reflect.TypeOf((*MockEngine)(nil).VerifyChildExecutionCompletionRecorded), ctx, request)
+}
+
+// VerifyFirstWorkflowTaskScheduled mocks base method.
+func (m *MockEngine) VerifyFirstWorkflowTaskScheduled(ctx context.Context, request *historyservice.VerifyFirstWorkflowTaskScheduledRequest) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "VerifyFirstWorkflowTaskScheduled", ctx, request)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// VerifyFirstWorkflowTaskScheduled indicates an expected call of VerifyFirstWorkflowTaskScheduled.
+func (mr *MockEngineMockRecorder) VerifyFirstWorkflowTaskScheduled(ctx, request interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "VerifyFirstWorkflowTaskScheduled", reflect.TypeOf((*MockEngine)(nil).VerifyFirstWorkflowTaskScheduled), ctx, request)
+}
+
+// MockReplicationStream is a mock of ReplicationStream interface.
+type MockReplicationStream struct {
+	ctrl     *gomock.Controller
+	recorder *MockReplicationStreamMockRecorder
+}
+
+// MockReplicationStreamMockRecorder is the mock recorder for MockReplicationStream.
+type MockReplicationStreamMockRecorder struct {
+	mock *MockReplicationStream
+}
+
+// NewMockReplicationStream creates a new mock instance.
+func NewMockReplicationStream(ctrl *gomock.Controller) *MockReplicationStream {
+	mock := &MockReplicationStream{ctrl: ctrl}
+	mock.recorder = &MockReplicationStreamMockRecorder{mock}
+	return mock
+}
+
+// EXPECT returns an object that allows the caller to indicate expected use.
+func (m *MockReplicationStream) EXPECT() *MockReplicationStreamMockRecorder {
+	return m.recorder
+}
+
+// ConvertReplicationTask mocks base method.
+func (m *MockReplicationStream) ConvertReplicationTask(ctx context.Context, task tasks.Task) (*repication.ReplicationTask, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ConvertReplicationTask", ctx, task)
+	ret0, _ := ret[0].(*repication.ReplicationTask)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// ConvertReplicationTask indicates an expected call of ConvertReplicationTask.
+func (mr *MockReplicationStreamMockRecorder) ConvertReplicationTask(ctx, task interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ConvertReplicationTask", reflect.TypeOf((*MockReplicationStream)(nil).ConvertReplicationTask), ctx, task)
+}
+
+// GetReplicationTasksIter mocks base method.
+func (m *MockReplicationStream) GetReplicationTasksIter(ctx context.Context, pollingCluster string, minInclusiveTaskID, maxExclusiveTaskID int64) (collection.Iterator[tasks.Task], error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetReplicationTasksIter", ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID)
+	ret0, _ := ret[0].(collection.Iterator[tasks.Task])
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetReplicationTasksIter indicates an expected call of GetReplicationTasksIter.
+func (mr *MockReplicationStreamMockRecorder) GetReplicationTasksIter(ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetReplicationTasksIter", reflect.TypeOf((*MockReplicationStream)(nil).GetReplicationTasksIter), ctx, pollingCluster, minInclusiveTaskID, maxExclusiveTaskID)
+}
+
+// SubscribeReplicationNotification mocks base method.
+func (m *MockReplicationStream) SubscribeReplicationNotification() (<-chan struct{}, string) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SubscribeReplicationNotification")
+	ret0, _ := ret[0].(<-chan struct{})
+	ret1, _ := ret[1].(string)
+	return ret0, ret1
+}
+
+// SubscribeReplicationNotification indicates an expected call of SubscribeReplicationNotification.
+func (mr *MockReplicationStreamMockRecorder) SubscribeReplicationNotification() *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SubscribeReplicationNotification", reflect.TypeOf((*MockReplicationStream)(nil).SubscribeReplicationNotification))
+}
+
+// UnsubscribeReplicationNotification mocks base method.
+func (m *MockReplicationStream) UnsubscribeReplicationNotification(arg0 string) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "UnsubscribeReplicationNotification", arg0)
+}
+
+// UnsubscribeReplicationNotification indicates an expected call of UnsubscribeReplicationNotification.
+func (mr *MockReplicationStreamMockRecorder) UnsubscribeReplicationNotification(arg0 interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "UnsubscribeReplicationNotification", reflect.TypeOf((*MockReplicationStream)(nil).UnsubscribeReplicationNotification), arg0)
 }
